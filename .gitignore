@@ -175,4 +175,5 @@ cython_debug/
 
 # Extra
 *.json
-data/
+astronomy-picture-of-the-day/
+webb-hubble-pictures/
