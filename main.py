@@ -15,17 +15,43 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import roc_auc_score, precision_score, recall_score
 
 from dataset import ImprovedTrainDatasetFromFolder
-from network import Discriminator, Generator, GeneratorLoss
+from network import ModelType, create_generator, create_discriminator, create_generator_loss
+
+from enum import Enum
+
+def set_model_type(model_type):
+    for model in ModelType:
+        if model.value == model_type:
+            return model
+    
+    return ModelType.SRGAN
+
+class DataDir(Enum):
+    APOC = "astronomy-picture-of-the-day/APOC"
+    APOC64 = "astronomy-picture-of-the-day/APOC64"
+    WEBB = "webb-hubble-pictures"
+
+def set_data_dir(data_dir):
+    if data_dir == "apoc":
+        DIR = "apoc"
+        return DataDir.APOC
+    elif data_dir == "64":
+        DIR = "apoc64"
+        return DataDir.APOC64
+    else:
+        DIR = "webb"
+        return DataDir.WEBB
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.autograd.set_detect_anomaly(True)
 warnings.filterwarnings("ignore", category=UserWarning, message="MIOpen.*")
 
-train_data_dir = ""
+train_data_dir = "webb-hubble-pictures"
 test_data_dir = "astronomy-picture-of-the-day/APOC"
 
+Image.MAX_IMAGE_PIXELS = None
 UPSCALE_FACTOR = 4
-CROP_SIZE = UPSCALE_FACTOR * 22
+CROP_SIZE = UPSCALE_FACTOR * 32
 N_EPOCHS = 150
 
 def get_data():
@@ -73,7 +99,7 @@ def compute_gradient_penalty(D, real_samples, fake_samples):
     
     return gradient_penalty
 
-def Train(N_EPOCHS, train_loader, netG, netD, optimizerG, optimizerD, generator_criterion):
+def Train(N_EPOCHS, train_loader, netG, netD, optimizerG, optimizerD, generator_criterion, model_type, DIR):
     # Initialize history trackers
     history = {
         'epoch': [],
@@ -85,7 +111,7 @@ def Train(N_EPOCHS, train_loader, netG, netD, optimizerG, optimizerD, generator_
 
     best_g_loss = float("inf")
     epochs_without_improvement = 0
-    patience = 20
+    patience = 10
     early_stop = False
 
     # Learning rate schedulers
@@ -93,7 +119,6 @@ def Train(N_EPOCHS, train_loader, netG, netD, optimizerG, optimizerD, generator_
         optimizerG, 'min', factor=0.5, patience=5, verbose=True)
     schedulerD = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizerD, 'min', factor=0.5, patience=5, verbose=True)
-
 
     for epoch in range(1, N_EPOCHS + 1):
         if early_stop:
@@ -121,20 +146,28 @@ def Train(N_EPOCHS, train_loader, netG, netD, optimizerG, optimizerD, generator_
 
             # Update Discriminator
             netD.zero_grad()
-            
-            # Train with real images
+
             real_out = netD(real_img)
-            real_loss = torch.mean((real_out - 1) ** 2)  # LSGAN loss for stability
-            
+
             # Train with fake images
             fake_img = netG(z)
             fake_out = netD(fake_img.detach())  # Don't backprop through generator
-            fake_loss = torch.mean(fake_out ** 2)  # LSGAN loss
+            
+            # Train with real images
+            if model_type == ModelType.SRGAN:
+                # SRGAN uses standard GAN loss
+                real_loss = torch.mean((real_out - 1) ** 2)
+                fake_loss = torch.mean(fake_out ** 2)
+                # gradient_penalty = compute_gradient_penalty(netD, real_img.data, fake_img.data)
+                # d_loss = (real_loss + fake_loss) / 2 + 10 * gradient_penalty  # Lambda=10 as in WGAN-GP
+                d_loss = (real_loss + fake_loss) / 2
+            else:
+                # ESRGAN uses relativistic discriminator loss
+                d_loss_real = torch.mean((real_out - torch.mean(fake_out) - 1) ** 2)
+                d_loss_fake = torch.mean((fake_out - torch.mean(real_out) + 1) ** 2)
+                d_loss = (d_loss_real + d_loss_fake) / 2
 
             # Combined loss and optimize
-            # gradient_penalty = compute_gradient_penalty(netD, real_img.data, fake_img.data)
-            # d_loss = (real_loss + fake_loss) / 2 + 10 * gradient_penalty  # Lambda=10 as in WGAN-GP
-            d_loss = (real_loss + fake_loss) / 2
             d_loss.backward()
             
             # Gradient clipping to prevent extreme updates
@@ -149,7 +182,13 @@ def Train(N_EPOCHS, train_loader, netG, netD, optimizerG, optimizerD, generator_
             fake_out = netD(fake_img)
             
             # Calculate generator loss
-            g_loss = generator_criterion(fake_out, fake_img, real_img)
+            if model_type == ModelType.SRGAN:
+                g_loss = generator_criterion(fake_out, fake_img, real_img)
+            else:
+                real_out_for_g = netD(real_img.detach())
+                g_loss_adv = torch.mean((fake_out - torch.mean(real_out_for_g) - 1) ** 2)
+                g_loss = generator_criterion(g_loss_adv, fake_img, real_img)
+            
             g_loss.backward()
             
             # Gradient clipping for stability
@@ -190,7 +229,7 @@ def Train(N_EPOCHS, train_loader, netG, netD, optimizerG, optimizerD, generator_
         netG.eval()
         
         # Create output directories
-        out_path = os.path.join("training_results/SRF_" + str(UPSCALE_FACTOR) + "/", f"{N_EPOCHS}")
+        out_path = os.path.join(f"training_results/{DIR}/{model_type.value}/", f"{N_EPOCHS}")
         if not os.path.exists(out_path):
             os.makedirs(out_path)
         
@@ -289,16 +328,16 @@ def Train(N_EPOCHS, train_loader, netG, netD, optimizerG, optimizerD, generator_
             print(f"Early stopping: No improvement for {patience} epochs")
             early_stop = True
 
-def Test(upscale_factor=4):
-    discriminator_path = f"training_results/SRF_{upscale_factor}/discriminator_best.pth"
-    netD = Discriminator().to(device)
+def Test(upscale_factor=4, model_type=ModelType.SRGAN):
+    discriminator_path = f"training_results/{model_type.value}/discriminator_best.pth"
+    netD = create_discriminator().to(device)
     netD.load_state_dict(torch.load(discriminator_path, weights_only=True))
 
     netD.eval()
 
     # Load your generator (if testing fake images)
-    generator_path = f"training_results/SRF_{upscale_factor}/generator_best.pth"
-    netG = Generator(UPSCALE_FACTOR).to(device)
+    generator_path = f"training_results/{model_type.value}/generator_best.pth"
+    netG = create_generator(UPSCALE_FACTOR).to(device)
     netG.load_state_dict(torch.load(generator_path, weights_only=True))
     netG.eval()
 
@@ -355,9 +394,14 @@ def Test(upscale_factor=4):
     # plot_discriminator_response(real_image[0], label=1)
     # plot_discriminator_response(fake_image[0], label=0)
 
-def Upscale(input_path, output_path, model_path, upscale_factor=4):
+def Upscale(input_path, output_path, model_path, upscale_factor=4, model_type=ModelType.SRGAN, up_dir=DataDir.APOC):
+    if up_dir == DataDir.APOC64:
+        input_path = input_path[1]
+    else:
+        input_path = input_path[0]
+
     # Load model
-    netG = Generator(upscale_factor).to(device)
+    netG = create_generator(upscale_factor, model_type).to(device)
     netG.load_state_dict(torch.load(model_path, map_location=device, weights_only=False))
     netG.eval()
     
@@ -367,7 +411,7 @@ def Upscale(input_path, output_path, model_path, upscale_factor=4):
     if img.mode != "RGB":
         img = img.convert("RGB")
     
-    img.save(os.path.join(output_path, "ORIGINAL.png"))
+    img.save(os.path.join(output_path, f"ORIGINAL.png"))
 
     bicubic_upscaled = img.resize(
         (img.width * UPSCALE_FACTOR, img.height * UPSCALE_FACTOR),
@@ -416,14 +460,20 @@ def main():
     # UPSCALE_FACTOR = int(input("\nHow much would you like to upscale an image by?: "))
     # CROP_SIZE = UPSCALE_FACTOR * 22
     N_EPOCHS = int(input("\nHow many epochs would you like to have?: "))
+    model_type = input("\nWhich model would you like to train? (srgan/esrgan): ").lower()
+    data_dir = input("\nWhich data directory would you like to use for training? (apoc, 64, webb): ").lower()
+    up_dir = input("\nWhich data directory would you like to use for upscaling? (apoc, 64): ").lower()
+    model_type = set_model_type(model_type)
+    data_dir = set_data_dir(data_dir)
+    up_dir = set_data_dir(up_dir)
 
-    train_data = ImprovedTrainDatasetFromFolder(test_data_dir, crop_size=CROP_SIZE, upscale_factor=UPSCALE_FACTOR)
+    train_data = ImprovedTrainDatasetFromFolder(data_dir.value, crop_size=CROP_SIZE, upscale_factor=UPSCALE_FACTOR)
     train_loader = DataLoader(train_data, batch_size=64, num_workers=0, shuffle=True)
 
-    netG = Generator(UPSCALE_FACTOR).to(device)
-    netD = Discriminator().to(device)
+    netG = create_generator(UPSCALE_FACTOR, model_type).to(device)
+    netD = create_discriminator(model_type).to(device)
 
-    generator_criterion = GeneratorLoss().to(device)
+    generator_criterion = create_generator_loss(device, model_type).to(device)
 
     optimizerG = optim.Adam(netG.parameters(), lr=0.002)
     optimizerD = optim.Adam(netD.parameters(), lr=0.002)
@@ -435,16 +485,32 @@ def main():
         "g_score": []
     }
 
-    Train(N_EPOCHS, train_loader, netG, netD, optimizerG, optimizerD, generator_criterion)
+    if data_dir == DataDir.APOC64:
+        DIR = "apoc64"
+    else:
+        if data_dir == DataDir.APOC:
+            DIR = "apoc"
+        else:
+            DIR = "webb"
+
+    Train(N_EPOCHS, train_loader, netG, netD, optimizerG, optimizerD, generator_criterion, model_type, DIR)
 
     # Test()
 
     inp = input("\nWhat is the name of the image you would like to upscale?: ")
     input_file = find_file_by_name(os.path.abspath(""), inp)
-    out = os.path.join("output/", inp)
+    if up_dir == DataDir.APOC64:
+        DIR = "apoc64"
+    else:
+        if up_dir == DataDir.APOC:
+            DIR = "apoc"
+        else:
+            DIR = "webb"
+    out = os.path.join("output/", f"{DIR}/{inp}")
     if not os.path.exists(out):
         os.makedirs(out)
-    Upscale(input_file[0], out, f"training_results/SRF_4/{N_EPOCHS}/generator_best.pth")
+
+    Upscale(input_file, out, f"training_results/{model_type.value}/{N_EPOCHS}/generator_best.pth", model_type=model_type, up_dir=up_dir)
 
 if __name__ == "__main__":
     main()

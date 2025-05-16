@@ -1,8 +1,14 @@
 import math
 import torch
 from torch import nn
-from torch import functional as F
 from torchvision.models.vgg import vgg19
+from torch.nn.utils import spectral_norm
+
+from enum import Enum
+
+class ModelType(Enum):
+    SRGAN = "srgan"
+    ESRGAN = "esrgan"
 
 class TVLoss(nn.Module):
     def __init__(self, tv_loss_weight=1):
@@ -41,8 +47,7 @@ class GeneratorLoss(nn.Module):
         # Pixel-wise loss
         self.mse_loss = nn.MSELoss()
         
-        # Color-specific loss
-        # self.color_loss = nn.L1Loss()
+        # L1 Loss
         self.l1_loss = nn.L1Loss()
         
         # TV loss for smoothness
@@ -52,7 +57,7 @@ class GeneratorLoss(nn.Module):
         self.content_weight = 0.01 # 0.006 originally
         self.pixel_weight = 1.0
         self.adversarial_weight = 0.05 # 0.001 originally
-        self.tv_weight = 2e-
+        self.tv_weight = 2e-6
         self.feature_weight = 0.1
 
     def forward(self, out_labels, out_images, target_images):
@@ -73,19 +78,6 @@ class GeneratorLoss(nn.Module):
         # TV loss
         tv_loss = self.tv_loss(out_images)
         
-        # Color consistency loss (in RGB space)
-        # Calculate mean color per channel and compare
-        # out_mean = torch.mean(out_images, dim=[2, 3])
-        # target_mean = torch.mean(target_images, dim=[2, 3])
-        # color_loss = self.color_loss(out_mean, target_mean)
-        
-        # # Combined loss with weights
-        # total_loss = (self.pixel_weight * pixel_loss + 
-        #               self.adversarial_weight * adversarial_loss + 
-        #               self.content_weight * content_loss + 
-        #               self.tv_weight * tv_loss +
-        #               self.color_weight * color_loss)
-        
         total_loss = (
             self.pixel_weight * pixel_loss +
             self.adversarial_weight * adversarial_loss +
@@ -95,6 +87,62 @@ class GeneratorLoss(nn.Module):
         )
 
         return total_loss
+
+class ESRGAN_GeneratorLoss(nn.Module):
+    def __init__(self, device="cuda"):
+        super(ESRGAN_GeneratorLoss, self).__init__()
+        
+        # VGG19 for perceptual loss (before activation)
+        vgg = vgg19(weights="DEFAULT")
+        loss_network = nn.Sequential(*list(vgg.features)[:35]).eval()
+        for param in loss_network.parameters():
+            param.requires_grad = False
+        self.loss_network = loss_network.to(device)
+        
+        # Loss functions
+        self.l1_loss = nn.L1Loss()
+        self.mse_loss = nn.MSELoss()
+        
+        # Loss weights
+        self.pixel_weight = 1.0
+        self.perceptual_weight = 1.0
+        self.adversarial_weight = 0.005
+    
+    def forward(self, out_labels, out_images, target_images):
+        # Perceptual loss (before activation)
+        out_features = self.loss_network(out_images)
+        target_features = self.loss_network(target_images.detach())
+        perceptual_loss = self.l1_loss(out_features, target_features)
+        
+        # Pixel loss
+        pixel_loss = self.l1_loss(out_images, target_images)
+        
+        # Relativistic adversarial loss
+        adversarial_loss = -torch.mean(torch.log(out_labels + 1e-8))
+        
+        # Total loss
+        total_loss = (self.pixel_weight * pixel_loss +
+                     self.perceptual_weight * perceptual_loss +
+                     self.adversarial_weight * adversarial_loss)
+        
+        return total_loss
+
+def create_generator(scale_factor, model_type=ModelType.SRGAN):
+    if model_type == ModelType.ESRGAN:
+        return ESRGAN_Generator(scale_factor)
+    return Generator(scale_factor)
+
+def create_discriminator(model_type=ModelType.SRGAN):
+    if model_type == ModelType.ESRGAN:
+        return ESRGAN_Discriminator()
+    return Discriminator()
+
+def create_generator_loss(device="cuda", model_type=ModelType.SRGAN):
+    if model_type == ModelType.ESRGAN:
+        return ESRGAN_GeneratorLoss(device)
+    return GeneratorLoss(device)
+
+# SRGAN
 
 class ResidualBlock(nn.Module):
     def __init__(self, channels=3):
@@ -242,4 +290,140 @@ class Discriminator(nn.Module):
     def forward(self, x):
         batch_size = x.size()[0]
 
+        return torch.sigmoid(self.net(x).view(batch_size))
+
+# ESRGAN
+
+class ResidualDenseBlock(nn.Module):
+    def __init__(self, num_feat=64, num_grow_ch=32):
+        super(ResidualDenseBlock, self).__init__()
+        self.conv1 = nn.Conv2d(num_feat, num_grow_ch, 3, 1, 1)
+        self.conv2 = nn.Conv2d(num_feat + num_grow_ch, num_grow_ch, 3, 1, 1)
+        self.conv3 = nn.Conv2d(num_feat + 2 * num_grow_ch, num_grow_ch, 3, 1, 1)
+        self.conv4 = nn.Conv2d(num_feat + 3 * num_grow_ch, num_grow_ch, 3, 1, 1)
+        self.conv5 = nn.Conv2d(num_feat + 4 * num_grow_ch, num_feat, 3, 1, 1)
+        self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+
+    def forward(self, x):
+        x1 = self.lrelu(self.conv1(x))
+        x2 = self.lrelu(self.conv2(torch.cat((x, x1), 1)))
+        x3 = self.lrelu(self.conv3(torch.cat((x, x1, x2), 1)))
+        x4 = self.lrelu(self.conv4(torch.cat((x, x1, x2, x3), 1)))
+        x5 = self.conv5(torch.cat((x, x1, x2, x3, x4), 1))
+        return x5 * 0.2 + x
+
+class RRDB(nn.Module):
+    # Residual in Residual Dense Block
+    def __init__(self, num_feat=64, num_grow_ch=32):
+        super(RRDB, self).__init__()
+        self.rdb1 = ResidualDenseBlock(num_feat, num_grow_ch)
+        self.rdb2 = ResidualDenseBlock(num_feat, num_grow_ch)
+        self.rdb3 = ResidualDenseBlock(num_feat, num_grow_ch)
+
+    def forward(self, x):
+        out = self.rdb1(x)
+        out = self.rdb2(out)
+        out = self.rdb3(out)
+        return out * 0.2 + x
+
+class ESRGAN_Generator(nn.Module):
+    def __init__(self, scale_factor, num_blocks=23, num_feat=64, num_grow_ch=32):
+        super(ESRGAN_Generator, self).__init__()
+        self.scale_factor = scale_factor
+        
+        # First convolution
+        self.conv_first = nn.Conv2d(3, num_feat, 3, 1, 1)
+        
+        # RRDB blocks
+        self.body = nn.ModuleList()
+        for _ in range(num_blocks):
+            self.body.append(RRDB(num_feat, num_grow_ch))
+        
+        # LR conv
+        self.conv_body = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+        
+        # Upsampling
+        if scale_factor == 2:
+            self.upsample = nn.Sequential(
+                nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1),
+                nn.PixelShuffle(2),
+                nn.LeakyReLU(0.2, inplace=True)
+            )
+        elif scale_factor == 4:
+            self.upsample = nn.Sequential(
+                nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1),
+                nn.PixelShuffle(2),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1),
+                nn.PixelShuffle(2),
+                nn.LeakyReLU(0.2, inplace=True)
+            )
+        elif scale_factor == 8:
+            self.upsample = nn.Sequential(
+                nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1),
+                nn.PixelShuffle(2),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1),
+                nn.PixelShuffle(2),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Conv2d(num_feat, num_feat * 4, 3, 1, 1),
+                nn.PixelShuffle(2),
+                nn.LeakyReLU(0.2, inplace=True)
+            )
+        
+        # Final convolution
+        self.conv_last = nn.Conv2d(num_feat, 3, 3, 1, 1)
+        
+    def forward(self, x):
+        feat = self.conv_first(x)
+        body_feat = feat.clone()
+        
+        for block in self.body:
+            body_feat = block(body_feat)
+        
+        body_feat = self.conv_body(body_feat)
+        feat = feat + body_feat
+        
+        out = self.upsample(feat)
+        out = self.conv_last(out)
+        
+        return torch.sigmoid(out)
+
+class ESRGAN_Discriminator(nn.Module):
+    def __init__(self):
+        super(ESRGAN_Discriminator, self).__init__()
+        
+        self.net = nn.Sequential(
+            spectral_norm(nn.Conv2d(3, 64, 3, 1, 1)),
+            nn.LeakyReLU(0.2, True),
+            
+            spectral_norm(nn.Conv2d(64, 64, 3, 2, 1)),
+            nn.LeakyReLU(0.2, True),
+            
+            spectral_norm(nn.Conv2d(64, 128, 3, 1, 1)),
+            nn.LeakyReLU(0.2, True),
+            
+            spectral_norm(nn.Conv2d(128, 128, 3, 2, 1)),
+            nn.LeakyReLU(0.2, True),
+            
+            spectral_norm(nn.Conv2d(128, 256, 3, 1, 1)),
+            nn.LeakyReLU(0.2, True),
+            
+            spectral_norm(nn.Conv2d(256, 256, 3, 2, 1)),
+            nn.LeakyReLU(0.2, True),
+            
+            spectral_norm(nn.Conv2d(256, 512, 3, 1, 1)),
+            nn.LeakyReLU(0.2, True),
+            
+            spectral_norm(nn.Conv2d(512, 512, 3, 2, 1)),
+            nn.LeakyReLU(0.2, True),
+            
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(512, 1024, 1),
+            nn.LeakyReLU(0.2, True),
+            nn.Conv2d(1024, 1, 1)
+        )
+    
+    def forward(self, x):
+        batch_size = x.size(0)
         return torch.sigmoid(self.net(x).view(batch_size))
