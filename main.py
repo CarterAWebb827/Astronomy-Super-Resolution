@@ -14,9 +14,9 @@ def print_welcome():
     print("="*50)
     print("\nThis tool helps you compare different Generative Adversarial Networks")
     print("for super-resolution tasks. Available options:")
-    print("1. SRGAN (original implementation)")
-    print("2. ESRGAN (PyTorch implementation)")
-    print("3. Real-ESRGAN (enhanced practical version)")
+    print("1. SRGAN")
+    print("2. ESRGAN")
+    print("3. Real-ESRGAN")
     print("\nPlease select which GAN you'd like to use:")
 
 def get_gan_choice():
@@ -43,6 +43,8 @@ def get_input_path(prompt):
         path = input(prompt)
         if os.path.exists(path):
             return path
+        elif path == "":
+            return None
         print(f"Path '{path}' does not exist. Please try again.")
 
 def get_output_path(prompt):
@@ -71,6 +73,16 @@ def get_float(prompt, default=None):
         except ValueError:
             print("Please enter a valid number")
 
+def get_string(prompt, default=None):
+    while True:
+        try:
+            user_input = input(prompt)
+            if not user_input and default is not None:
+                return default
+            return user_input
+        except ValueError:
+            print("Please enter a valid string")
+
 def get_yes_no(prompt, default=None):
     while True:
         user_input = input(prompt).lower()
@@ -87,38 +99,35 @@ def handle_srgan(mode):
     
     if mode == 'train':
         print("\nTraining SRGAN requires the following:")
-        train_path = get_input_path("Path to training images: ")
-        val_path = get_input_path("Path to validation images: ")
         epochs = get_integer("Number of epochs [100]: ", 100)
-        batch_size = get_integer("Batch size [16]: ", 16)
-        lr = get_float("Learning rate [0.0001]: ", 0.0001)
+        crop_size = get_integer("Batch size [88]: ", 88)
+        up = get_integer("Upscale factor [4]: ", 4)
         
         print("\nStarting SRGAN training with:")
-        print(f"- Training data: {train_path}")
-        print(f"- Validation data: {val_path}")
         print(f"- Epochs: {epochs}")
-        print(f"- Batch size: {batch_size}")
-        print(f"- Learning rate: {lr}")
+        print(f"- Crop size: {crop_size}")
+        print(f"- Upscale factor: {up}")
         
-        # Here you would normally call the actual training script
-        # For example:
-        # subprocess.run(["python", "SRGAN/train.py", "--train", train_path, ...])
-        print("\n[This would launch the actual SRGAN training]")
+        print("\n[Training SRGAN]")
+        subprocess.run(["python", "ext/SRGAN/train.py", "--num_epochs", str(epochs), "--crop_size", 
+                        str(crop_size), "--upscale_factor", str(up)])
         
     else:  # inference
         input_path = get_input_path("Path to input image or directory: ")
-        output_path = get_output_path("Path to save output: ")
-        scale = get_integer("Scale factor (2, 4, or 8) [4]: ", 4)
+        up = get_integer("Upscale factor [4]: ", 4)
+        name = get_string("Model name [netG_epoch_4_100.pth]: ", "netG_epoch_4_100.pth")
         
         print("\nRunning SRGAN inference with:")
-        print(f"- Input: {input_path}")
-        print(f"- Output directory: {output_path}")
-        print(f"- Scale factor: {scale}")
+        print(f"- Input image: {input_path}")
+        print(f"- Upcale factor: {up}")
+        print(f"- Model name: {name}")
         
-        # Here you would normally call the actual inference script
-        print("\n[This would launch the actual SRGAN inference]")
+        print("\n[Testing SRGAN]")
+        subprocess.run(["python", "ext/SRGAN/train.py", "--image_name", input_path, "--upscale_factor", 
+                        str(up), "--model_name", str(name)])
+        
 
-def handle_esrgan_pytorch(mode):
+def handle_esrgan(mode):
     print("\nESRGAN (PyTorch implementation) selected")
     
     if mode == 'train':
@@ -127,7 +136,7 @@ def handle_esrgan_pytorch(mode):
         val_path = get_input_path("Path to HR validation images: ")
         lr_path = get_input_path("Path to LR training images (leave empty to generate): ", "")
         epochs = get_integer("Number of epochs [500]: ", 500)
-        batch_size = get_integer("Batch size [16]: ", 16)
+        crop_size = get_integer("Batch size [16]: ", 16)
         lr = get_float("Learning rate [0.0002]: ", 0.0002)
         
         print("\nStarting ESRGAN training with:")
@@ -138,7 +147,7 @@ def handle_esrgan_pytorch(mode):
             print("- LR images will be generated automatically")
         print(f"- HR validation data: {val_path}")
         print(f"- Epochs: {epochs}")
-        print(f"- Batch size: {batch_size}")
+        print(f"- Batch size: {crop_size}")
         print(f"- Learning rate: {lr}")
         
         # Here you would call the actual training script
@@ -177,14 +186,14 @@ def handle_real_esrgan(mode):
         train_path = get_input_path("Path to training images: ")
         val_path = get_input_path("Path to validation images: ")
         epochs = get_integer("Number of epochs [1000000]: ", 1000000)
-        batch_size = get_integer("Batch size [16]: ", 16)
+        crop_size = get_integer("Batch size [16]: ", 16)
         lr = get_float("Learning rate [0.0001]: ", 0.0001)
         
         print("\nStarting Real-ESRGAN training with:")
         print(f"- Training data: {train_path}")
         print(f"- Validation data: {val_path}")
         print(f"- Epochs: {epochs}")
-        print(f"- Batch size: {batch_size}")
+        print(f"- Batch size: {crop_size}")
         print(f"- Learning rate: {lr}")
         print("\nNote: Real-ESRGAN training typically requires days/weeks on high-end GPUs")
         
@@ -214,7 +223,7 @@ def main():
     if gan_choice == GANType.SRGAN:
         handle_srgan(mode)
     elif gan_choice == GANType.ESRGAN_PYTORCH:
-        handle_esrgan_pytorch(mode)
+        handle_esrgan(mode)
     elif gan_choice == GANType.REAL_ESRGAN:
         handle_real_esrgan(mode)
     

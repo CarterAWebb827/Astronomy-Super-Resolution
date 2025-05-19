@@ -177,3 +177,5 @@ cython_debug/
 *.json
 images/
 ext/
+models/
+training_results/
