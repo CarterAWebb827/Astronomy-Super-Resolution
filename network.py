@@ -3,6 +3,7 @@ import torch
 from torch import nn
 from torchvision.models.vgg import vgg19
 from torch.nn.utils import spectral_norm
+import torch.nn.functional as F
 
 from enum import Enum
 
@@ -132,9 +133,10 @@ def create_generator(scale_factor, model_type=ModelType.SRGAN):
         return ESRGAN_Generator(scale_factor)
     return Generator(scale_factor)
 
-def create_discriminator(model_type=ModelType.SRGAN):
+def create_discriminator(model_type=ModelType.SRGAN, height=1, width=1):
     if model_type == ModelType.ESRGAN:
-        return ESRGAN_Discriminator()
+        # hr_shape = (opt.hr_height, opt.hr_width)
+        return ESRGAN_Discriminator(input_shape=(3, height, width))
     return Discriminator()
 
 def create_generator_loss(device="cuda", model_type=ModelType.SRGAN):
@@ -180,70 +182,36 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
 
         upsample_block_num = int(math.log(scale_factor, 2))
-        
-        # Initial convolution to extract features - keeping RGB channels separate initially
-        self.initial = nn.Sequential(
+
+        super(Generator, self).__init__()
+        self.block1 = nn.Sequential(
             nn.Conv2d(3, 64, kernel_size=9, padding=4),
             nn.PReLU()
         )
-        
-        # Residual blocks with skip connections to maintain spatial information
-        self.residual_blocks = nn.ModuleList([ResidualBlock(64) for _ in range(16)])
-        
-        # Post-residual convolution
-        self.post_res = nn.Sequential(
+        self.block2 = ResidualBlock(64)
+        self.block3 = ResidualBlock(64)
+        self.block4 = ResidualBlock(64)
+        self.block5 = ResidualBlock(64)
+        self.block6 = ResidualBlock(64)
+        self.block7 = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64)
         )
+        block8 = [UpsampleBlock(64, 2) for _ in range(upsample_block_num)]
+        block8.append(nn.Conv2d(64, 3, kernel_size=9, padding=4))
+        self.block8 = nn.Sequential(*block8)
         
-        # Upsampling blocks
-        upsampling = []
-        for _ in range(upsample_block_num):
-            upsampling.append(UpsampleBlock(64, 2))
-        self.upsampling = nn.Sequential(*upsampling)
-        
-        # Final convolution to reconstruct RGB image
-        self.final = nn.Sequential(
-            nn.Conv2d(64, 3, kernel_size=9, padding=4),
-            nn.Sigmoid()  # Using sigmoid to ensure output is in range [0,1]
-        )
-        
-        # Initialize weights properly
-        self._initialize_weights()
-        
-    def _initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                # He initialization for ReLU-based layers
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-    
     def forward(self, x):
-        # Store input for global skip connection
-        initial_features = self.initial(x)
-        
-        # Pass through residual blocks
-        x = initial_features
-        for res_block in self.residual_blocks:
-            x = res_block(x)
-            
-        # Post-residual convolution
-        x = self.post_res(x)
-        
-        # Global skip connection
-        x = x + initial_features
-        
-        # Upsampling
-        x = self.upsampling(x)
-        
-        # Final convolution with sigmoid activation
-        x = self.final(x)
-        
-        return x
+        block1 = self.block1(x)
+        block2 = self.block2(block1)
+        block3 = self.block3(block2)
+        block4 = self.block4(block3)
+        block5 = self.block5(block4)
+        block6 = self.block6(block5)
+        block7 = self.block7(block6)
+        block8 = self.block8(block1 + block7)
+
+        return (torch.tanh(block8) + 1) / 2
 
 class Discriminator(nn.Module):
     def __init__(self):

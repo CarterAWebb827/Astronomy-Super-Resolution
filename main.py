@@ -610,7 +610,7 @@ def main():
             UP_DIR = "apoc"
         else:
             UP_DIR = "webb"
-    out = os.path.join("output/", f"{UP_DIR}/{inp}")
+    out = os.path.join("output/", f"{model_type.value}/{UP_DIR}/{inp}")
     if not os.path.exists(out):
         os.makedirs(out)
 

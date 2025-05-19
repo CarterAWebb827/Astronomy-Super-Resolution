@@ -177,4 +177,5 @@ cython_debug/
 *.json
 astronomy-picture-of-the-day/
 webb-hubble-pictures/
-training_results
+training_results/
+ext/
