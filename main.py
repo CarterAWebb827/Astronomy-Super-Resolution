@@ -13,11 +13,14 @@ from tqdm import tqdm
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_auc_score, precision_score, recall_score
+from torch.amp import GradScaler, autocast
 
 from dataset import ImprovedTrainDatasetFromFolder
 from network import ModelType, create_generator, create_discriminator, create_generator_loss
 
 from enum import Enum
+
+warnings.filterwarnings("ignore", message="Attempting to use hipBLASLt on an unsupported architecture!")
 
 def set_model_type(model_type):
     for model in ModelType:
@@ -114,11 +117,37 @@ def Train(N_EPOCHS, train_loader, netG, netD, optimizerG, optimizerD, generator_
     patience = 10
     early_stop = False
 
+    # Gradient accumulation steps
+    accumulation_steps = 4
+    d_accumulation_steps = 2
+    
+    # Mixed precision training
+    scalerG = GradScaler()
+    scalerD = GradScaler()
+
     # Learning rate schedulers
     schedulerG = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizerG, 'min', factor=0.5, patience=5, verbose=True)
     schedulerD = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizerD, 'min', factor=0.5, patience=5, verbose=True)
+
+    # Training balance parameters
+    d_update_freq = 1  # Start with updating D every step
+    g_update_freq = 1  # Start with updating G every step
+    min_d_update_freq = 1
+    max_d_update_freq = 5
+    min_g_update_freq = 1
+    max_g_update_freq = 3
+
+    # Adaptive training threshold
+    d_score_target = 0.5  # Ideal discriminator accuracy
+    d_score_tolerance = 0.2  # Allowed deviation from target
+    
+    # Check initial weights
+    for name, param in netG.named_parameters():
+        if torch.isnan(param).any():
+            print(f"NaN in generator {name} at initialization!")
+            param.data[torch.isnan(param.data)] = 0
 
     for epoch in range(1, N_EPOCHS + 1):
         if early_stop:
@@ -136,77 +165,143 @@ def Train(N_EPOCHS, train_loader, netG, netD, optimizerG, optimizerD, generator_
 
         netG.train()
         netD.train()
+        
+        # Track gradient accumulation
+        g_accum, d_accum = 0, 0
 
-        for data, target in train_bar:
+        for i, (data, target) in enumerate(train_bar):
             batch_size = data.size(0)
             running_results["batch_sizes"] += batch_size
 
-            real_img = Variable(target).to(device)
-            z = Variable(data).to(device)
+            real_img = target.to(device)
+            z = data.to(device)
 
-            # Update Discriminator
-            netD.zero_grad()
+            # --- Discriminator Update ---
+            if i % d_update_freq == 0:  # Only update D according to current frequency
+                optimizerD.zero_grad()
+                
+                with autocast("cuda"):
+                    # Forward pass with stability checks
+                    fake_img = netG(z).detach()
+                    fake_img = torch.clamp(fake_img, 0, 1)  # Ensure valid range
+                    
+                    real_out = netD(real_img)
+                    fake_out = netD(fake_img)
+                    
+                    # Stable loss calculation
+                    if model_type == ModelType.SRGAN:
+                        real_loss = torch.mean(torch.square(real_out - 1 + 1e-8))
+                        fake_loss = torch.mean(torch.square(fake_out + 1e-8))
+                        d_loss = (real_loss + fake_loss) / 2
+                    else:
+                        # ESRGAN with more stable relativistic loss
+                        diff_real = real_out - torch.mean(fake_out) - 1
+                        diff_fake = fake_out - torch.mean(real_out) + 1
+                        d_loss_real = torch.mean(torch.square(diff_real.clamp(min=-10, max=10) + 1e-8))
+                        d_loss_fake = torch.mean(torch.square(diff_fake.clamp(min=-10, max=10) + 1e-8))
+                        d_loss = (d_loss_real + d_loss_fake) / 2
+                
+                # Scale loss and backpropagate
+                scalerD.scale(d_loss / d_accumulation_steps).backward()
+                d_accum += 1
 
-            real_out = netD(real_img)
+                if d_accum % d_accumulation_steps == 0 or (i + 1) == len(train_loader):
+                    # Gradient clipping with stability checks
+                    scalerD.unscale_(optimizerD)
+                    torch.nn.utils.clip_grad_norm_(netD.parameters(), max_norm=0.5)  # Reduced from 1.0
+                    
+                    # Check for NaN gradients
+                    for param in netD.parameters():
+                        if param.grad is not None and torch.isnan(param.grad).any():
+                            param.grad[torch.isnan(param.grad)] = 0
+                    
+                    scalerD.step(optimizerD)
+                    scalerD.update()
+                    optimizerD.zero_grad()
+                    d_accum = 0
 
-            # Train with fake images
-            fake_img = netG(z)
-            fake_out = netD(fake_img.detach())  # Don't backprop through generator
-            
-            # Train with real images
-            if model_type == ModelType.SRGAN:
-                # SRGAN uses standard GAN loss
-                real_loss = torch.mean((real_out - 1) ** 2)
-                fake_loss = torch.mean(fake_out ** 2)
-                # gradient_penalty = compute_gradient_penalty(netD, real_img.data, fake_img.data)
-                # d_loss = (real_loss + fake_loss) / 2 + 10 * gradient_penalty  # Lambda=10 as in WGAN-GP
-                d_loss = (real_loss + fake_loss) / 2
-            else:
-                # ESRGAN uses relativistic discriminator loss
-                d_loss_real = torch.mean((real_out - torch.mean(fake_out) - 1) ** 2)
-                d_loss_fake = torch.mean((fake_out - torch.mean(real_out) + 1) ** 2)
-                d_loss = (d_loss_real + d_loss_fake) / 2
+            # --- Generator Update ---
+            if i % g_update_freq == 0:  # Only update G according to current frequency
+                optimizerG.zero_grad()
+                
+                with autocast("cuda"):
+                    # Forward pass with stability checks
+                    fake_img = netG(z)
+                    fake_img = torch.clamp(fake_img, 0, 1)  # Ensure valid range
+                    
+                    fake_out = netD(fake_img)
+                    
+                    # Stable loss calculation
+                    if model_type == ModelType.SRGAN:
+                        g_loss = generator_criterion(fake_out, fake_img, real_img)
+                    else:
+                        with torch.no_grad():
+                            real_out_for_g = netD(real_img)
+                        diff_adv = fake_out - torch.mean(real_out_for_g) - 1
+                        g_loss_adv = torch.mean(torch.square(diff_adv.clamp(min=-10, max=10) + 1e-8))
+                        g_loss = generator_criterion(g_loss_adv, fake_img, real_img)
+                
+                # Scale loss and backpropagate
+                scalerG.scale(g_loss / accumulation_steps).backward()
+                g_accum += 1
 
-            # Combined loss and optimize
-            d_loss.backward()
-            
-            # Gradient clipping to prevent extreme updates
-            torch.nn.utils.clip_grad_norm_(netD.parameters(), max_norm=1.0)
-            optimizerD.step()
+                if g_accum % accumulation_steps == 0 or (i + 1) == len(train_loader):
+                    # Gradient clipping with stability checks
+                    scalerG.unscale_(optimizerG)
+                    torch.nn.utils.clip_grad_norm_(netG.parameters(), max_norm=1.0)
+                    
+                    # Check for NaN gradients
+                    for param in netG.parameters():
+                        if param.grad is not None and torch.isnan(param.grad).any():
+                            param.grad[torch.isnan(param.grad)] = 0
+                    
+                    scalerG.step(optimizerG)
+                    scalerG.update()
+                    optimizerG.zero_grad()
+                    g_accum = 0
 
-            # Update Generator
-            netG.zero_grad()
-            
-            # Get new output from generator
-            fake_img = netG(z)
-            fake_out = netD(fake_img)
-            
-            # Calculate generator loss
-            if model_type == ModelType.SRGAN:
-                g_loss = generator_criterion(fake_out, fake_img, real_img)
-            else:
-                real_out_for_g = netD(real_img.detach())
-                g_loss_adv = torch.mean((fake_out - torch.mean(real_out_for_g) - 1) ** 2)
-                g_loss = generator_criterion(g_loss_adv, fake_img, real_img)
-            
-            g_loss.backward()
-            
-            # Gradient clipping for stability
-            torch.nn.utils.clip_grad_norm_(netG.parameters(), max_norm=1.0)
-            optimizerG.step()
+            # Update running results with stability checks
+            running_results["g_loss"] += g_loss.item() * batch_size if not torch.isnan(g_loss) else 0
+            running_results["d_loss"] += d_loss.item() * batch_size if not torch.isnan(d_loss) else 0
+            running_results["g_score"] += real_out.mean().item() * batch_size if not torch.isnan(real_out.mean()) else 0
+            running_results["d_score"] += real_out.mean().item() * batch_size if not torch.isnan(real_out.mean()) else 0
 
-            running_results["g_loss"] += g_loss.item() * batch_size
-            running_results["d_loss"] += d_loss.item() * batch_size
-            running_results["g_score"] += real_out.mean().item() * batch_size
-            running_results["d_score"] += real_out.mean().item() * batch_size
+            # Adaptive frequency adjustment
+            current_d_score = running_results["d_score"] / (running_results["batch_sizes"] or 1)
+            if current_d_score > (d_score_target + d_score_tolerance):  # D is too strong
+                d_update_freq = min(d_update_freq + 1, max_d_update_freq)
+                g_update_freq = max(g_update_freq - 1, min_g_update_freq)
+                print(f"Adjusting: D too strong (score={current_d_score:.2f}). "
+                      f"Now updating D every {d_update_freq} steps, G every {g_update_freq} steps")
+            elif current_d_score < (d_score_target - d_score_tolerance):  # G is too strong
+                d_update_freq = max(d_update_freq - 1, min_d_update_freq)
+                g_update_freq = min(g_update_freq + 1, max_g_update_freq)
+                print(f"Adjusting: G too strong (score={current_d_score:.2f}). "
+                      f"Now updating D every {d_update_freq} steps, G every {g_update_freq} steps")
 
             # Update progress bar
             train_bar.set_description(desc="[%d/%d] Loss_D: %.4f, Loss_G: %.4f, D(x): %.4f, D(G(z)): %.4f" % (
-                epoch, N_EPOCHS, running_results["d_loss"] / running_results["batch_sizes"],
-                running_results["g_loss"] / running_results["batch_sizes"],
-                running_results["d_score"] / running_results["batch_sizes"],
-                running_results["g_score"] / running_results["batch_sizes"]
+                epoch, N_EPOCHS, 
+                running_results["d_loss"] / (running_results["batch_sizes"] or 1),
+                running_results["g_loss"] / (running_results["batch_sizes"] or 1),
+                running_results["d_score"] / (running_results["batch_sizes"] or 1),
+                running_results["g_score"] / (running_results["batch_sizes"] or 1)
             ))
+            
+            # Clear memory and check for NaNs
+            if i % 50 == 0:
+                torch.cuda.empty_cache()
+                
+                # Check model weights for NaNs
+                for name, param in netG.named_parameters():
+                    if torch.isnan(param).any():
+                        print(f"NaN detected in generator {name}")
+                        param.data[torch.isnan(param.data)] = 0
+                
+                for name, param in netD.named_parameters():
+                    if torch.isnan(param).any():
+                        print(f"NaN detected in discriminator {name}")
+                        param.data[torch.isnan(param.data)] = 0
         
         # Calculate epoch metrics
         epoch_d_loss = running_results["d_loss"] / running_results["batch_sizes"]
@@ -402,7 +497,7 @@ def Upscale(input_path, output_path, model_path, upscale_factor=4, model_type=Mo
 
     # Load model
     netG = create_generator(upscale_factor, model_type).to(device)
-    netG.load_state_dict(torch.load(model_path, map_location=device, weights_only=False))
+    netG.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
     netG.eval()
     
     # Preprocess
@@ -475,8 +570,17 @@ def main():
 
     generator_criterion = create_generator_loss(device, model_type).to(device)
 
-    optimizerG = optim.Adam(netG.parameters(), lr=0.002)
-    optimizerD = optim.Adam(netD.parameters(), lr=0.002)
+    # In your main() function:
+    if model_type == ModelType.ESRGAN:
+        # More stable settings for ESRGAN
+        optimizerG = optim.Adam(netG.parameters(), lr=1e-4, betas=(0.9, 0.99))
+        optimizerD = optim.Adam(netD.parameters(), lr=4e-4, betas=(0.9, 0.99))
+        
+        # Smaller batch sizes work better
+        train_loader = DataLoader(train_data, batch_size=8, shuffle=True)
+    else:
+        optimizerG = optim.Adam(netG.parameters(), lr=0.0002, betas=(0.9, 0.999))
+        optimizerD = optim.Adam(netD.parameters(), lr=0.0002, betas=(0.9, 0.999))
 
     results = {
         "d_loss": [],
@@ -500,17 +604,17 @@ def main():
     inp = input("\nWhat is the name of the image you would like to upscale?: ")
     input_file = find_file_by_name(os.path.abspath(""), inp)
     if up_dir == DataDir.APOC64:
-        DIR = "apoc64"
+        UP_DIR = "apoc64"
     else:
         if up_dir == DataDir.APOC:
-            DIR = "apoc"
+            UP_DIR = "apoc"
         else:
-            DIR = "webb"
-    out = os.path.join("output/", f"{DIR}/{inp}")
+            UP_DIR = "webb"
+    out = os.path.join("output/", f"{UP_DIR}/{inp}")
     if not os.path.exists(out):
         os.makedirs(out)
 
-    Upscale(input_file, out, f"training_results/{model_type.value}/{N_EPOCHS}/generator_best.pth", model_type=model_type, up_dir=up_dir)
+    Upscale(input_file, out, f"training_results/{DIR}/{model_type.value}/{N_EPOCHS}/generator_best.pth", model_type=model_type, up_dir=up_dir)
 
 if __name__ == "__main__":
     main()
