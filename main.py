@@ -40,7 +40,9 @@ def get_mode():
 
 def get_input_path(prompt):
     while True:
+        base = os.path.dirname(__file__)
         path = input(prompt)
+        path = os.path.join(base, f"images/{path}")
         if os.path.exists(path):
             return path
         elif path == "":
@@ -113,19 +115,74 @@ def handle_srgan(mode):
                         str(crop_size), "--upscale_factor", str(up)])
         
     else:  # inference
-        input_path = get_input_path("Path to input image or directory: ")
+        input_path = get_input_path("Path to input image, directory, or video: ")
         up = get_integer("Upscale factor [4]: ", 4)
         name = get_string("Model name [netG_epoch_4_100.pth]: ", "netG_epoch_4_100.pth")
         
-        print("\nRunning SRGAN inference with:")
-        print(f"- Input image: {input_path}")
-        print(f"- Upcale factor: {up}")
-        print(f"- Model name: {name}")
+        # Supported image extensions
+        image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff')
+        # Supported video extensions
+        video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.flv')
         
-        print("\n[Testing SRGAN]")
-        subprocess.run(["python", "ext/SRGAN/train.py", "--image_name", input_path, "--upscale_factor", 
-                        str(up), "--model_name", str(name)])
+        if os.path.isdir(input_path):
+            # Handle directory case
+            print(f"\nProcessing all images in directory: {input_path}")
+            image_files = [f for f in os.listdir(input_path) 
+                          if f.lower().endswith(image_extensions)]
+            
+            if not image_files:
+                print("No valid image files found in the directory!")
+                return
+            
+            print(f"Found {len(image_files)} images to process")
+            
+            for img_file in image_files:
+                img_path = os.path.join(input_path, img_file)
+                print(f"\nProcessing: {img_file}")
+                subprocess.run([
+                    "python", "ext/SRGAN/test_image.py",
+                    "--image_name", img_path,
+                    "--upscale_factor", str(up),
+                    "--model_name", name
+                ])
+            
+            print("\nFinished processing all images in directory")
         
+        elif input_path.lower().endswith(video_extensions):
+            # Handle video case
+            print("\nRunning SRGAN video processing with:")
+            print(f"- Input video: {input_path}")
+            print(f"- Upscale factor: {up}")
+            print(f"- Model name: {name}")
+            
+            print("\n[Processing Video]")
+            subprocess.run([
+                "python", "ext/SRGAN/test_video.py",
+                "--video_name", input_path,
+                "--upscale_factor", str(up),
+                "--model_name", name
+            ])
+        
+        else:
+            # Handle single image case
+            if not input_path.lower().endswith(image_extensions):
+                print("\nWarning: File extension not recognized as supported image format!")
+                proceed = get_yes_no("Continue anyway? [y/n]: ", False)
+                if not proceed:
+                    return
+            
+            print("\nRunning SRGAN inference with:")
+            print(f"- Input image: {input_path}")
+            print(f"- Upscale factor: {up}")
+            print(f"- Model name: {name}")
+            
+            print("\n[Testing SRGAN]")
+            subprocess.run([
+                "python", "ext/SRGAN/test_image.py",
+                "--image_name", input_path,
+                "--upscale_factor", str(up),
+                "--model_name", name
+            ])
 
 def handle_esrgan(mode):
     print("\nESRGAN (PyTorch implementation) selected")
