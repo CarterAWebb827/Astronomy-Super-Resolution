@@ -104,21 +104,33 @@ def handle_srgan(mode):
         epochs = get_integer("Number of epochs [100]: ", 100)
         crop_size = get_integer("Batch size [88]: ", 88)
         up = get_integer("Upscale factor [4]: ", 4)
+        name = get_string("Name of Directory: ", "")
         
         print("\nStarting SRGAN training with:")
         print(f"- Epochs: {epochs}")
         print(f"- Crop size: {crop_size}")
         print(f"- Upscale factor: {up}")
+        print(f"- Name of directory: {name}")
         
         print("\n[Training SRGAN]")
         subprocess.run(["python", "ext/SRGAN/train.py", "--num_epochs", str(epochs), "--crop_size", 
-                        str(crop_size), "--upscale_factor", str(up)])
+                        str(crop_size), "--upscale_factor", str(up), "--name", name])
         
     else:  # inference
         input_path = get_input_path("Path to input image, directory, or video: ")
         up = get_integer("Upscale factor [4]: ", 4)
-        name = get_string("Model name [netG_epoch_4_100.pth]: ", "netG_epoch_4_100.pth")
+        if up == 2:
+            name = get_string("Model name [netG_epoch_2_100.pth]: ", "netG_epoch_2_100.pth")
+        else:
+            name = get_string("Model name [netG_epoch_4_100.pth]: ", "netG_epoch_4_100.pth")
         memory = get_float("Percentage use of GPU [0.9]: ", 0.9)
+        direc = get_string("Model directory: ", "")
+        use_memory_save = get_string("Use memory save? [y/n]: ", "n")
+
+        if use_memory_save == "y":
+            mem_save = True
+        else:
+            mem_save = False
 
         # Supported image extensions
         image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff')
@@ -145,7 +157,9 @@ def handle_srgan(mode):
                     "--image_name", img_path,
                     "--upscale_factor", str(up),
                     "--model_name", name,
-                    "--memory", memory
+                    "--memory", str(memory),
+                    "--direc", direc,
+                    "--use_memory_save", str(mem_save)
                 ])
             
             print("\nFinished processing all images in directory")
@@ -164,7 +178,9 @@ def handle_srgan(mode):
                 "--video_name", input_path,
                 "--upscale_factor", str(up),
                 "--model_name", name,
-                "--memory", memory
+                # "--memory", str(memory),
+                # "--direc", direc,
+                # "--use_memory_save", str(mem_save)
             ])
         
         else:
@@ -187,7 +203,9 @@ def handle_srgan(mode):
                 "--image_name", input_path,
                 "--upscale_factor", str(up),
                 "--model_name", name,
-                "--memory", memory
+                "--memory", str(memory),
+                "--direc", direc,
+                "--use_memory_save", str(mem_save)
             ])
 
 def handle_esrgan(mode):

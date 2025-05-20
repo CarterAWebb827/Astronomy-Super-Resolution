@@ -1,4 +1,6 @@
 import argparse
+import os
+import gc
 
 import cv2
 import numpy as np
@@ -11,75 +13,106 @@ from tqdm import tqdm
 
 from model import Generator
 
-if __name__ == "__main__":
+def process_video_frame_by_frame():
     parser = argparse.ArgumentParser(description='Test Single Video')
     parser.add_argument('--upscale_factor', default=4, type=int, help='super resolution upscale factor')
-    parser.add_argument('--video_name', type=str, help='test low resolution video name')
+    parser.add_argument('--video_name', type=str, required=True, help='test low resolution video name')
     parser.add_argument('--model_name', default='netG_epoch_4_100.pth', type=str, help='generator model epoch name')
+    parser.add_argument('--chunk_size', default=10, type=int, help='number of frames to process at once')
+    parser.add_argument('--batch_size', default=4, type=int, help='sub-batch size for GPU processing')
     opt = parser.parse_args()
 
-    UPSCALE_FACTOR = opt.upscale_factor
-    VIDEO_NAME = opt.video_name
-    MODEL_NAME = opt.model_name
+    # Setup device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    torch.backends.cudnn.benchmark = True
+    torch.cuda.empty_cache()
+    
+    # Load model
+    model = Generator(opt.upscale_factor).eval().to(device)
+    model_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                             'models', 'srgan', 'epochs', opt.model_name)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    
+    # Video setup
+    if not os.path.exists(opt.video_name):
+        raise FileNotFoundError(f"Video file {opt.video_name} not found")
+    
+    cap = cv2.VideoCapture(opt.video_name)
+    if not cap.isOpened():
+        raise IOError(f"Could not open video {opt.video_name}")
+    
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    # Output video writer
+    sr_width, sr_height = width * opt.upscale_factor, height * opt.upscale_factor
+    output_name = f'sr_{os.path.basename(opt.video_name)}'
+    sr_writer = cv2.VideoWriter(
+        output_name, 
+        cv2.VideoWriter_fourcc(*'mp4v'), 
+        fps, 
+        (sr_width, sr_height)
+    )
 
-    model = Generator(UPSCALE_FACTOR).eval()
-    if torch.cuda.is_available():
-        model = model.cuda()
-    # for cpu
-    # model.load_state_dict(torch.load('epochs/' + MODEL_NAME, map_location=lambda storage, loc: storage))
-    model.load_state_dict(torch.load('epochs/' + MODEL_NAME))
+    # Frame processing loop
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    progress = tqdm(total=frame_count, desc='Processing video')
+    
+    while True:
+        frames = []
+        for _ in range(opt.chunk_size):
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frames.append(frame)
+        
+        if not frames:
+            break
+            
+        # Process frames in batch
+        with torch.no_grad():
+            # Convert frames to tensors properly
+            input_tensors = []
+            for frame in frames:
+                # Convert BGR to RGB and to PIL Image
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                pil_image = Image.fromarray(rgb_frame)
+                tensor = ToTensor()(pil_image)
+                input_tensors.append(tensor)
+            
+            inputs = torch.stack(input_tensors).to(device)
+            
+            # Process in sub-batches
+            outputs = []
+            for i in range(0, len(inputs), opt.batch_size):
+                batch = inputs[i:i+opt.batch_size]
+                out = model(batch)
+                outputs.append(out.cpu())
+                torch.cuda.empty_cache()
+            
+            sr_frames = torch.cat(outputs)
+        
+        # Save frames
+        for frame_tensor in sr_frames:
+            # Convert tensor to numpy array
+            frame_np = frame_tensor.clamp(0, 1).numpy()
+            frame_np = np.transpose(frame_np, (1, 2, 0)) * 255
+            frame_np = frame_np.astype(np.uint8)
+            
+            # Convert RGB to BGR for OpenCV
+            frame_bgr = cv2.cvtColor(frame_np, cv2.COLOR_RGB2BGR)
+            sr_writer.write(frame_bgr)
+        
+        progress.update(len(frames))
+        del inputs, outputs, sr_frames, input_tensors
+        gc.collect()
+    
+    # Cleanup
+    cap.release()
+    sr_writer.release()
+    progress.close()
+    print(f"Video processing complete. Saved to {output_name}")
 
-    videoCapture = cv2.VideoCapture(VIDEO_NAME)
-    fps = videoCapture.get(cv2.CAP_PROP_FPS)
-    frame_numbers = videoCapture.get(cv2.CAP_PROP_FRAME_COUNT)
-    sr_video_size = (int(videoCapture.get(cv2.CAP_PROP_FRAME_WIDTH) * UPSCALE_FACTOR),
-                     int(videoCapture.get(cv2.CAP_PROP_FRAME_HEIGHT)) * UPSCALE_FACTOR)
-    compared_video_size = (int(videoCapture.get(cv2.CAP_PROP_FRAME_WIDTH) * UPSCALE_FACTOR * 2 + 10),
-                           int(videoCapture.get(cv2.CAP_PROP_FRAME_HEIGHT)) * UPSCALE_FACTOR + 10 + int(
-                               int(videoCapture.get(cv2.CAP_PROP_FRAME_WIDTH) * UPSCALE_FACTOR * 2 + 10) / int(
-                                   10 * int(int(
-                                       videoCapture.get(cv2.CAP_PROP_FRAME_WIDTH) * UPSCALE_FACTOR) // 5 + 1)) * int(
-                                   int(videoCapture.get(cv2.CAP_PROP_FRAME_WIDTH) * UPSCALE_FACTOR) // 5 - 9)))
-    output_sr_name = 'out_srf_' + str(UPSCALE_FACTOR) + '_' + VIDEO_NAME.split('.')[0] + '.avi'
-    output_compared_name = 'compare_srf_' + str(UPSCALE_FACTOR) + '_' + VIDEO_NAME.split('.')[0] + '.avi'
-    sr_video_writer = cv2.VideoWriter(output_sr_name, cv2.VideoWriter_fourcc('M', 'P', 'E', 'G'), fps, sr_video_size)
-    compared_video_writer = cv2.VideoWriter(output_compared_name, cv2.VideoWriter_fourcc('M', 'P', 'E', 'G'), fps,
-                                            compared_video_size)
-    # read frame
-    success, frame = videoCapture.read()
-    test_bar = tqdm(range(int(frame_numbers)), desc='[processing video and saving result videos]')
-    for index in test_bar:
-        if success:
-            image = Variable(ToTensor()(frame), volatile=True).unsqueeze(0)
-            if torch.cuda.is_available():
-                image = image.cuda()
-
-            out = model(image)
-            out = out.cpu()
-            out_img = out.data[0].numpy()
-            out_img *= 255.0
-            out_img = (np.uint8(out_img)).transpose((1, 2, 0))
-            # save sr video
-            sr_video_writer.write(out_img)
-
-            # make compared video and crop shot of left top\right top\center\left bottom\right bottom
-            out_img = ToPILImage()(out_img)
-            crop_out_imgs = transforms.FiveCrop(size=out_img.width // 5 - 9)(out_img)
-            crop_out_imgs = [np.asarray(transforms.Pad(padding=(10, 5, 0, 0))(img)) for img in crop_out_imgs]
-            out_img = transforms.Pad(padding=(5, 0, 0, 5))(out_img)
-            compared_img = transforms.Resize(size=(sr_video_size[1], sr_video_size[0]), interpolation=Image.BICUBIC)(
-                ToPILImage()(frame))
-            crop_compared_imgs = transforms.FiveCrop(size=compared_img.width // 5 - 9)(compared_img)
-            crop_compared_imgs = [np.asarray(transforms.Pad(padding=(0, 5, 10, 0))(img)) for img in crop_compared_imgs]
-            compared_img = transforms.Pad(padding=(0, 0, 5, 5))(compared_img)
-            # concatenate all the pictures to one single picture
-            top_image = np.concatenate((np.asarray(compared_img), np.asarray(out_img)), axis=1)
-            bottom_image = np.concatenate(crop_compared_imgs + crop_out_imgs, axis=1)
-            bottom_image = np.asarray(transforms.Resize(
-                size=(int(top_image.shape[1] / bottom_image.shape[1] * bottom_image.shape[0]), top_image.shape[1]))(
-                ToPILImage()(bottom_image)))
-            final_image = np.concatenate((top_image, bottom_image))
-            # save compared video
-            compared_video_writer.write(final_image)
-            # next frame
-            success, frame = videoCapture.read()
+if __name__ == "__main__":
+    process_video_frame_by_frame()

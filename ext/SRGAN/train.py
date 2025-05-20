@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 import pytorch_ssim
+from torchmetrics.image import StructuralSimilarityIndexMeasure
+import torch.nn.functional as F
 from data_utils import TrainDatasetFromFolder, ValDatasetFromFolder, display_transform
 from loss import GeneratorLoss
 from model import Generator, Discriminator
@@ -19,6 +21,7 @@ parser.add_argument('--crop_size', default=88, type=int, help='training images c
 parser.add_argument('--upscale_factor', default=4, type=int, choices=[2, 4, 8],
                     help='super resolution upscale factor')
 parser.add_argument('--num_epochs', default=100, type=int, help='train epoch number')
+parser.add_argument('--name', default="", type=str, help='name of directory for training')
 
 if __name__ == '__main__':
     opt = parser.parse_args()
@@ -26,6 +29,7 @@ if __name__ == '__main__':
     CROP_SIZE = opt.crop_size
     UPSCALE_FACTOR = opt.upscale_factor
     NUM_EPOCHS = opt.num_epochs
+    NAME = opt.name
 
     base = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     
@@ -106,8 +110,15 @@ if __name__ == '__main__':
                 running_results['d_score'] / running_results['batch_sizes'],
                 running_results['g_score'] / running_results['batch_sizes']))
     
+        ssim_metric = StructuralSimilarityIndexMeasure(data_range=1.0)
+        if torch.cuda.is_available():
+            ssim_metric = ssim_metric.cuda()
+
         netG.eval()
-        out_path = f'{base}/training_results/srgan/SRF_' + str(UPSCALE_FACTOR) + '/'
+        if NAME == "":
+            out_path = f'{base}/training_results/srgan/SRF_' + str(UPSCALE_FACTOR) + '/'
+        else:
+            out_path = f'{base}/training_results/srgan/SRF_' + str(UPSCALE_FACTOR) + f'/{NAME}'
         if not os.path.exists(out_path):
             os.makedirs(out_path)
         
@@ -127,7 +138,8 @@ if __name__ == '__main__':
         
                 batch_mse = ((sr - hr) ** 2).data.mean()
                 valing_results['mse'] += batch_mse * batch_size
-                batch_ssim = pytorch_ssim.ssim(sr, hr).item()
+                # batch_ssim = pytorch_ssim.ssim(sr, hr).item()
+                batch_ssim = ssim_metric(sr, hr).item()
                 valing_results['ssims'] += batch_ssim * batch_size
                 valing_results['psnr'] = 10 * log10((hr.max()**2) / (valing_results['mse'] / valing_results['batch_sizes']))
                 valing_results['ssim'] = valing_results['ssims'] / valing_results['batch_sizes']
@@ -148,8 +160,11 @@ if __name__ == '__main__':
                 index += 1
     
         # save model parameters
-        torch.save(netG.state_dict(), f'{base}/models/srgan/epochs/netG_epoch_%d_%d.pth' % (UPSCALE_FACTOR, epoch))
-        torch.save(netD.state_dict(), f'{base}/models/srgan/epochs/netD_epoch_%d_%d.pth' % (UPSCALE_FACTOR, epoch))
+        torch_save = f'{base}/models/srgan/epochs/{NAME}'
+        os.makedirs(torch_save, exist_ok=True)
+
+        torch.save(netG.state_dict(), f'{torch_save}/netG_epoch_%d_%d.pth' % (UPSCALE_FACTOR, epoch))
+        torch.save(netD.state_dict(), f'{torch_save}/netD_epoch_%d_%d.pth' % (UPSCALE_FACTOR, epoch))
         # save loss\scores\psnr\ssim
         results['d_loss'].append(running_results['d_loss'] / running_results['batch_sizes'])
         results['g_loss'].append(running_results['g_loss'] / running_results['batch_sizes'])
@@ -159,7 +174,8 @@ if __name__ == '__main__':
         results['ssim'].append(valing_results['ssim'])
     
         if epoch % 10 == 0 and epoch != 0:
-            out_path = f'{base}/output/srgan/statistics/'
+            out_path = f'{base}/output/srgan/statistics/{NAME}/'
+            os.makedirs(out_path, exist_ok=True)
             data_frame = pd.DataFrame(
                 data={'Loss_D': results['d_loss'], 'Loss_G': results['g_loss'], 'Score_D': results['d_score'],
                       'Score_G': results['g_score'], 'PSNR': results['psnr'], 'SSIM': results['ssim']},

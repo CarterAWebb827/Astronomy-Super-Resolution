@@ -16,6 +16,8 @@ parser.add_argument('--test_mode', default='GPU', type=str, choices=['GPU', 'CPU
 parser.add_argument('--image_name', type=str, help='test low resolution image name')
 parser.add_argument('--model_name', default='netG_epoch_4_100.pth', type=str, help='generator model epoch name')
 parser.add_argument('--memory', default=0.9, type=float, help='percentage of GPU usage by program')
+parser.add_argument('--direc', default="", type=str, help='name of directory for model')
+parser.add_argument('--use_memory_save', default=False, type=bool, help='bool for use of memory saving implementations that could affect output negatively')
 opt = parser.parse_args()
 
 UPSCALE_FACTOR = opt.upscale_factor
@@ -23,6 +25,8 @@ TEST_MODE = True if opt.test_mode == 'GPU' else False
 IMAGE_NAME = opt.image_name
 MODEL_NAME = opt.model_name
 MEMORY = opt.memory
+DIREC = opt.direc
+MEM_SAVE = opt.use_memory_save
 
 if TEST_MODE:
     if MEMORY > 1.0:
@@ -31,11 +35,15 @@ if TEST_MODE:
         MEMORY = 0.01
     torch.cuda.set_per_process_memory_fraction(MEMORY)
     torch.cuda.empty_cache()
-    torch.backends.cudnn.benchmark = True  # Optimizes CUDA operations
-    torch.backends.cudnn.enabled = True
+
+    print(f"GPU Device: {torch.cuda.get_device_name(0)}")
+    print(f"ROCm available: {torch.version.hip is not None}")  # Should be True for AMD
 
 base = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-output_dir = os.path.join(base, 'output', 'srgan', MODEL_NAME)
+if DIREC == "":
+    output_dir = os.path.join(base, 'output', 'srgan', MODEL_NAME)
+else:
+    output_dir = os.path.join(base, 'output', 'srgan', DIREC, MODEL_NAME)
 os.makedirs(output_dir, exist_ok=True)
 
 # Get input image name and create output filename
@@ -46,19 +54,39 @@ output_path = os.path.join(output_dir, output_filename)
 model = Generator(UPSCALE_FACTOR).eval()
 if TEST_MODE:
     model.cuda()
-    model.load_state_dict(torch.load(f'{base}/models/srgan/epochs/' + MODEL_NAME, weights_only=True))
+    if DIREC == "":
+        model.load_state_dict(torch.load(f'{base}/models/srgan/epochs/' + MODEL_NAME, weights_only=False))
+    else:
+        model.load_state_dict(torch.load(f'{base}/models/srgan/epochs/{DIREC}/' + MODEL_NAME, weights_only=False))
+
+    if MEM_SAVE:
+        model = torch.jit.script(model) # Graph optimization
+        model.half() # Convert model to FP1
 else:
-    model.load_state_dict(torch.load(f'{base}/models/srgan/epochs/' + MODEL_NAME, map_location=lambda storage, loc: storage, weights_only=True))
+    if DIREC == "":
+        model.load_state_dict(torch.load(f'{base}/models/srgan/epochs/' + MODEL_NAME, map_location=lambda storage, loc: storage, weights_only=False))
+    else:
+        model.load_state_dict(torch.load(f'{base}/models/srgan/epochs/{DIREC}/' + MODEL_NAME, map_location=lambda storage, loc: storage, weights_only=False))
 
 image = Image.open(IMAGE_NAME)
 image = Variable(ToTensor()(image), volatile=True).unsqueeze(0)
 if TEST_MODE:
     image = image.cuda()
 
+    if MEM_SAVE:
+        image = image.half() # Convert input to FP16
+
 # Time the processing
-start = time.time()
-out = model(image)
-elapsed = time.time() - start
+if MEM_SAVE:
+    with torch.no_grad():
+        start = time.time()
+        out = model(image.half() if TEST_MODE else image)  # FP16 if on GPU
+        torch.cuda.synchronize()  # Proper timing
+        elapsed = time.time() - start
+else:
+    start = time.time()
+    out = model(image)
+    elapsed = time.time() - start
 print(f'Processing time: {elapsed:.2f}s')
 
 # Save output
