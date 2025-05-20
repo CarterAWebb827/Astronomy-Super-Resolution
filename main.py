@@ -118,7 +118,8 @@ def handle_srgan(mode):
         input_path = get_input_path("Path to input image, directory, or video: ")
         up = get_integer("Upscale factor [4]: ", 4)
         name = get_string("Model name [netG_epoch_4_100.pth]: ", "netG_epoch_4_100.pth")
-        
+        memory = get_float("Percentage use of GPU [0.9]: ", 0.9)
+
         # Supported image extensions
         image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff')
         # Supported video extensions
@@ -143,7 +144,8 @@ def handle_srgan(mode):
                     "python", "ext/SRGAN/test_image.py",
                     "--image_name", img_path,
                     "--upscale_factor", str(up),
-                    "--model_name", name
+                    "--model_name", name,
+                    "--memory", memory
                 ])
             
             print("\nFinished processing all images in directory")
@@ -154,13 +156,15 @@ def handle_srgan(mode):
             print(f"- Input video: {input_path}")
             print(f"- Upscale factor: {up}")
             print(f"- Model name: {name}")
+            print(f"- GPU percentage: {memory}")
             
             print("\n[Processing Video]")
             subprocess.run([
                 "python", "ext/SRGAN/test_video.py",
                 "--video_name", input_path,
                 "--upscale_factor", str(up),
-                "--model_name", name
+                "--model_name", name,
+                "--memory", memory
             ])
         
         else:
@@ -175,13 +179,15 @@ def handle_srgan(mode):
             print(f"- Input image: {input_path}")
             print(f"- Upscale factor: {up}")
             print(f"- Model name: {name}")
+            print(f"- GPU percentage: {memory}")
             
             print("\n[Testing SRGAN]")
             subprocess.run([
                 "python", "ext/SRGAN/test_image.py",
                 "--image_name", input_path,
                 "--upscale_factor", str(up),
-                "--model_name", name
+                "--model_name", name,
+                "--memory", memory
             ])
 
 def handle_esrgan(mode):

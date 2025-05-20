@@ -176,7 +176,6 @@ cython_debug/
 # Extra
 *.json
 images/
-ext/
 models/
 training_results/
 data/
