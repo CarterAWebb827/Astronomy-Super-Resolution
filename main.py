@@ -125,12 +125,6 @@ def handle_srgan(mode):
             name = get_string("Model name [netG_epoch_4_100.pth]: ", "netG_epoch_4_100.pth")
         memory = get_float("Percentage use of GPU [0.9]: ", 0.9)
         direc = get_string("Model directory: ", "")
-        use_memory_save = get_string("Use memory save? [y/n]: ", "n")
-
-        if use_memory_save == "y":
-            mem_save = True
-        else:
-            mem_save = False
 
         # Supported image extensions
         image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff')
@@ -158,8 +152,7 @@ def handle_srgan(mode):
                     "--upscale_factor", str(up),
                     "--model_name", name,
                     "--memory", str(memory),
-                    "--direc", direc,
-                    "--use_memory_save", str(mem_save)
+                    "--direc", direc
                 ])
             
             print("\nFinished processing all images in directory")
@@ -179,8 +172,7 @@ def handle_srgan(mode):
                 "--upscale_factor", str(up),
                 "--model_name", name,
                 # "--memory", str(memory),
-                # "--direc", direc,
-                # "--use_memory_save", str(mem_save)
+                # "--direc", direc
             ])
         
         else:
@@ -204,8 +196,7 @@ def handle_srgan(mode):
                 "--upscale_factor", str(up),
                 "--model_name", name,
                 "--memory", str(memory),
-                "--direc", direc,
-                "--use_memory_save", str(mem_save)
+                "--direc", direc
             ])
 
 def handle_esrgan(mode):
