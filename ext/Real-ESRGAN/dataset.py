@@ -45,7 +45,11 @@ class TrainDatasetFromFolder(Dataset):
         self.lr_transform = train_lr_transform(crop_size, upscale_factor)
 
     def __getitem__(self, index):
-        hr_image = self.hr_transform(Image.open(self.image_filenames[index]))
+        img = Image.open(self.image_filenames[index])
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        hr_image = self.hr_transform(img)
         lr_image = self.lr_transform(hr_image)
         return lr_image, hr_image
     
@@ -61,6 +65,9 @@ class ValDatasetFromFolder(Dataset):
 
     def __getitem__(self, index):
         hr_image = Image.open(self.image_filenames[index])
+        if hr_image.mode != 'RGB':
+            hr_image = hr_image.convert('RGB')
+        
         w, h = hr_image.size
         crop_size = calculate_valid_crop_size(min(w, h), self.upscale_factor)
         lr_scale = Resize(crop_size // self.upscale_factor, interpolation=Image.BICUBIC)
@@ -86,8 +93,14 @@ class TestDatasetFromFolder(Dataset):
     def __getitem__(self, index):
         image_name = self.lr_filenames[index].split('/')[-1]
         lr_image = Image.open(self.lr_filenames[index])
+        if lr_image.mode != 'RGB':
+            lr_image = lr_image.convert('RGB')
+        
         w, h = lr_image.size
         hr_image = Image.open(self.hr_filenames[index])
+        if hr_image.mode != 'RGB':
+            hr_image = hr_image.convert('RGB')
+        
         hr_scale = Resize((self.upscale_factor * h, self.upscale_factor * w), interpolation=Image.BICUBIC)
         hr_restore_img = hr_scale(lr_image)
         return image_name, ToTensor()(lr_image), ToTensor()(hr_restore_img), ToTensor()(hr_image)

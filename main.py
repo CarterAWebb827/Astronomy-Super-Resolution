@@ -5,8 +5,7 @@ from enum import Enum
 
 class GANType(Enum):
     SRGAN = 1
-    ESRGAN_PYTORCH = 2
-    REAL_ESRGAN = 3
+    REAL_ESRGAN = 2
 
 def print_welcome():
     print("\n" + "="*50)
@@ -15,17 +14,22 @@ def print_welcome():
     print("\nThis tool helps you compare different Generative Adversarial Networks")
     print("for super-resolution tasks. Available options:")
     print("1. SRGAN")
-    print("2. ESRGAN")
+    print("2. Real-ESRGAN")
     print("3. Real-ESRGAN")
+    print("4. Real-ESRGAN")
+    print("5. Real-ESRGAN")
+    print("6. Real-ESRGAN")
+    print("7. Real-ESRGAN")
+    print("8. Real-ESRGAN")
     print("\nPlease select which GAN you'd like to use:")
 
 def get_gan_choice():
     while True:
         try:
-            choice = int(input("Enter 1, 2, or 3: "))
-            if choice in [1, 2, 3]:
+            choice = int(input("Enter a number (1-8): "))
+            if choice in [1, 2, 3, 4, 5, 6, 7, 8]:
                 return GANType(choice)
-            print("Please enter a valid number (1-3)")
+            print("Please enter a valid number (1-8)")
         except ValueError:
             print("Please enter a number")
 
@@ -199,93 +203,110 @@ def handle_srgan(mode):
                 "--direc", direc
             ])
 
-def handle_esrgan(mode):
-    print("\nESRGAN (PyTorch implementation) selected")
-    
-    if mode == 'train':
-        print("\nTraining ESRGAN requires the following:")
-        train_path = get_input_path("Path to HR training images: ")
-        val_path = get_input_path("Path to HR validation images: ")
-        lr_path = get_input_path("Path to LR training images (leave empty to generate): ", "")
-        epochs = get_integer("Number of epochs [500]: ", 500)
-        crop_size = get_integer("Batch size [16]: ", 16)
-        lr = get_float("Learning rate [0.0002]: ", 0.0002)
-        
-        print("\nStarting ESRGAN training with:")
-        print(f"- HR training data: {train_path}")
-        if lr_path:
-            print(f"- LR training data: {lr_path}")
-        else:
-            print("- LR images will be generated automatically")
-        print(f"- HR validation data: {val_path}")
-        print(f"- Epochs: {epochs}")
-        print(f"- Batch size: {crop_size}")
-        print(f"- Learning rate: {lr}")
-        
-        # Here you would call the actual training script
-        print("\n[This would launch the actual ESRGAN training]")
-        
-    else:  # inference
-        input_path = get_input_path("Path to input image or directory: ")
-        output_path = get_output_path("Path to save output: ")
-        scale = get_integer("Scale factor (2, 4) [4]: ", 4)
-        model_path = get_input_path("Path to pretrained model (leave empty for default): ", "")
-        
-        print("\nRunning ESRGAN inference with:")
-        print(f"- Input: {input_path}")
-        print(f"- Output directory: {output_path}")
-        print(f"- Scale factor: {scale}")
-        if model_path:
-            print(f"- Custom model: {model_path}")
-        else:
-            print("- Using default model")
-        
-        # Here you would call the actual inference script
-        print("\n[This would launch the actual ESRGAN inference]")
-
 def handle_real_esrgan(mode):
     print("\nReal-ESRGAN selected (enhanced practical version)")
     
     if mode == 'train':
-        print("\nTraining Real-ESRGAN is more complex and typically requires:")
-        print("1. A dataset with diverse high-quality images")
-        print("2. Significant computational resources")
-        
-        proceed = get_yes_no("\nDo you want to proceed with training? [y/n]: ")
-        if not proceed:
-            return
-            
-        train_path = get_input_path("Path to training images: ")
-        val_path = get_input_path("Path to validation images: ")
-        epochs = get_integer("Number of epochs [1000000]: ", 1000000)
-        crop_size = get_integer("Batch size [16]: ", 16)
-        lr = get_float("Learning rate [0.0001]: ", 0.0001)
-        
+        print("\nTraining Real-ESRGAN with the following options:")
+        # epochs = get_integer("Number of epochs [100]: ", 100)
+        crop_size = get_integer("Crop size [88]: ", 88)
+        batch_size = get_integer("Batch size [48]: ", 48) 
+        upscale = get_integer("Upscale factor [4]: ", 4)
+        # Num batches per epoch = total num images // batch_size
+        warmup = get_integer("Warmup batches [400]: ", 400) # Num batches per epoch * desired num of epochs
+        total_batches = get_integer("Total batches [711]: ", 711)
+        res_blocks = get_integer("Number of residual blocks [23]: ", 23)
+        lr = get_float("Learning rate [0.0002]: ", 0.0002)
+        name = get_string("Name of Directory: ", "")
+
         print("\nStarting Real-ESRGAN training with:")
-        print(f"- Training data: {train_path}")
-        print(f"- Validation data: {val_path}")
-        print(f"- Epochs: {epochs}")
-        print(f"- Batch size: {crop_size}")
+        # print(f"- Epochs: {epochs}")
+        print(f"- Crop size: {crop_size}")
+        print(f"- Batch size: {batch_size}")
+        print(f"- Upscale factor: {upscale}")
+        print(f"- Warmup batches: {warmup}")
+        print(f"- Total batches: {total_batches}")
         print(f"- Learning rate: {lr}")
-        print("\nNote: Real-ESRGAN training typically requires days/weeks on high-end GPUs")
+        print(f"- Name of directory: {name}")
         
-        # Here you would call the actual training script
-        print("\n[This would launch the actual Real-ESRGAN training]")
+        print("\n[Training Real-ESRGAN]")
+        subprocess.run([
+            "python", "ext/Real-ESRGAN/train.py",
+            # "--n_batches", str(epochs),
+            "--crop_size", str(crop_size),
+            "--batch_size", str(batch_size),
+            "--upscale_factor", str(upscale),
+            "--warmup_batches", str(warmup),
+            "--n_batches", str(total_batches),
+            "--lr", str(lr),
+            "--name", name
+        ])
         
     else:  # inference
-        input_path = get_input_path("Path to input image or directory: ")
-        output_path = get_output_path("Path to save output: ")
-        scale = get_integer("Scale factor (2, 4) [4]: ", 4)
-        face_enhance = get_yes_no("Use face enhancement? [y/n]: ", False)
+        input_path = get_input_path("Path to input image, directory, or video: ")
+        model_name = get_string("Model name [generator_720.pth]: ", "generator_720.pth")
+        test_mode = get_yes_no("Use GPU acceleration? [y/n]: ", True)
         
-        print("\nRunning Real-ESRGAN inference with:")
-        print(f"- Input: {input_path}")
-        print(f"- Output directory: {output_path}")
-        print(f"- Scale factor: {scale}")
-        print(f"- Face enhancement: {'Yes' if face_enhance else 'No'}")
+        # Supported image extensions
+        image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff')
+        # Supported video extensions
+        # video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.flv')
         
-        # Here you would call the actual inference script
-        print("\n[This would launch the actual Real-ESRGAN inference]")
+        if os.path.isdir(input_path):
+            # Handle directory case
+            print(f"\nProcessing all images in directory: {input_path}")
+            image_files = [f for f in os.listdir(input_path) 
+                          if f.lower().endswith(image_extensions)]
+            
+            if not image_files:
+                print("No valid image files found in the directory!")
+                return
+            
+            print(f"Found {len(image_files)} images to process")
+            
+            for img_file in image_files:
+                img_path = os.path.join(input_path, img_file)
+                print(f"\nProcessing: {img_file}")
+                subprocess.run([
+                    "python", "ext/Real-ESRGAN/test_images.py",
+                    "--image_name", img_path,
+                    "--model_name", model_name,
+                    "--test_mode", "GPU" if test_mode else "CPU"
+                ])
+            
+            print("\nFinished processing all images in directory")
+        
+        # elif input_path.lower().endswith(video_extensions):
+        #     # Handle video case
+        #     print("\nRunning Real-ESRGAN video processing with:")
+        #     print(f"- Input video: {input_path}")
+        #     print(f"- Model name: {model_name}")
+        #     print(f"- GPU acceleration: {'Yes' if test_mode else 'No'}")
+            
+        #     print("\n[Processing Video]")
+        #     # Note: You would need to implement or point to a video processing script
+        #     print("Video processing not implemented in this example")
+        
+        else:
+            # Handle single image case
+            if not input_path.lower().endswith(image_extensions):
+                print("\nWarning: File extension not recognized as supported image format!")
+                proceed = get_yes_no("Continue anyway? [y/n]: ", False)
+                if not proceed:
+                    return
+            
+            print("\nRunning Real-ESRGAN inference with:")
+            print(f"- Input image: {input_path}")
+            print(f"- Model name: {model_name}")
+            print(f"- GPU acceleration: {'Yes' if test_mode else 'No'}")
+            
+            print("\n[Testing Real-ESRGAN]")
+            subprocess.run([
+                "python", "ext/Real-ESRGAN/test_images.py",
+                "--image_name", input_path,
+                "--model_name", model_name,
+                "--test_mode", "GPU" if test_mode else "CPU"
+            ])
 
 def main():
     print_welcome()
@@ -294,8 +315,6 @@ def main():
     
     if gan_choice == GANType.SRGAN:
         handle_srgan(mode)
-    elif gan_choice == GANType.ESRGAN_PYTORCH:
-        handle_esrgan(mode)
     elif gan_choice == GANType.REAL_ESRGAN:
         handle_real_esrgan(mode)
     

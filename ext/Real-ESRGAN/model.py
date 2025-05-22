@@ -8,7 +8,7 @@ from torch.nn.utils import spectral_norm
 class FeatureExtractor(nn.Module):
     def __init__(self, layers=[0, 5, 10, 19, 28]):
         super(FeatureExtractor, self).__init__()
-        vgg19_model = vgg19(pretrained=True)
+        vgg19_model = vgg19(weights="DEFAULT")
         self.layers = layers
         self.net = nn.Sequential(*[vgg19_model.features[i] for i in range(max(layers) + 1)])
 

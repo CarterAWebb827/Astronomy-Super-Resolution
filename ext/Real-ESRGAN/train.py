@@ -10,10 +10,8 @@ from utils import *
 
 from torchvision.utils import save_image
 
-from d2l import torch as d2l
-
-os.makedirs('images/training', exist_ok=True)
-os.makedirs('saved_models', exist_ok=True)
+# os.makedirs('images/training', exist_ok=True)
+# os.makedirs('saved_models', exist_ok=True)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--crop_size', default=256, type=int, help='training images crop size')
@@ -25,14 +23,23 @@ parser.add_argument('--residual_blocks', default=23, type=int, help='number of r
 parser.add_argument('--batch', default=0, type=int, help='batch to start training from')
 parser.add_argument('--lr', default=0.0002, type=float, help='adam: learning rate')
 parser.add_argument('--sample_interval', default=100, type=int, help='interval between saving image samples')
+parser.add_argument('--name', default="", type=str, help='name of directory for training')
 opt = parser.parse_args()
 print(opt)
 
-device = d2l.try_gpu()
-print(device)
+if torch.cuda.is_available():
+    device = "cuda"
+else:
+    device = "cpu"
+
+# print(device)
 
 hr_shape = (opt.crop_size, opt.crop_size)
 channels = 3
+
+NAME = opt.name
+
+base = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 
 # initialize generator and discriminator  
 generator = GeneratorRRDB(channels, num_res_blocks=opt.residual_blocks).to(device)
@@ -47,9 +54,19 @@ criterion_GAN = torch.nn.BCEWithLogitsLoss().to(device)
 criterion_content = torch.nn.L1Loss().to(device)
 criterion_pixel = torch.nn.L1Loss().to(device)
 
+models = os.path.join(base, "models", "real-esrgan", f"{opt.n_batches}")
+
+if NAME == "":
+    out_model = models
+else:
+    out_model = os.path.join(models, NAME)
+
+if not os.path.exists(out_model):
+    os.makedirs(out_model)
+
 if opt.batch != 0:
-    generator.load_state_dict(torch.load('saved_models/generator_%d.pth' % opt.batch))
-    discriminator.load_state_dict(torch.load('saved_models/discriminator_%d.pth' % opt.batch))
+    generator.load_state_dict(torch.load(f'{out_model}/generator_%d.pth' % opt.batch))
+    discriminator.load_state_dict(torch.load(f'{out_model}/discriminator_%d.pth' % opt.batch))
 
 # initialize optimzier 
 optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr)
@@ -57,7 +74,9 @@ optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=1e-4)
 
 Tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.Tensor
 
-train_set = TrainDatasetFromFolder('data/train_HR', crop_size=opt.crop_size, upscale_factor=4)
+data = os.path.join(base, "data")
+
+train_set = TrainDatasetFromFolder(f'{data}/train', crop_size=opt.crop_size, upscale_factor=opt.upscale_factor)
 train_loader = DataLoader(dataset=train_set, num_workers=4, batch_size=opt.batch_size, shuffle=True)
 
 # initialize ema  
@@ -159,18 +178,21 @@ while batch < opt.n_batches:
             )
         )
 
+        images_out = os.path.join(base, "training_results", "real-esrgan", str(opt.n_batches))
+        os.makedirs(images_out, exist_ok=True)
+
         if batches_done % opt.sample_interval == 0:
             imgs_lr = nn.functional.interpolate(imgs_lr, scale_factor=4, mode='bicubic')
             img_grid = torch.clamp(torch.cat((imgs_lr, gen_hr, imgs_hr), -1), min=0, max=1)
-            save_image(img_grid, 'images/training/%d.png' % batches_done, nrow=1, normalize=False)
+            save_image(img_grid, f'{images_out}/%d.png' % batches_done, nrow=1, normalize=False)
         
     batch = batches_done + 1
 
     ema_G.apply_shadow()
     ema_D.apply_shadow()
 
-    torch.save(generator.state_dict(), 'saved_models/generator_%d.pth' % batch)
-    torch.save(discriminator.state_dict(), 'saved_models/discriminator_%d.pth' % batch)
+    torch.save(generator.state_dict(), f'{out_model}/generator_%d.pth' % batch)
+    torch.save(discriminator.state_dict(), f'{out_model}/discriminator_%d.pth' % batch)
 
     ema_G.restore()
     ema_D.restore()
