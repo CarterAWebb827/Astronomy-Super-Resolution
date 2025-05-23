@@ -6,22 +6,29 @@ from enum import Enum
 class GANType(Enum):
     SRGAN = 1
     REAL_ESRGAN = 2
+    RCAN = 3
+    SwinIR = 4
+    HAT = 5
+    ZSSR = 6
+    DIPNet = 7
+    SinSR = 8
+    StableSR = 9
 
 def print_welcome():
     print("\n" + "="*50)
-    print("GAN Comparison Tool".center(50))
+    print("Super Resolution Comparison Tool".center(50))
     print("="*50)
-    print("\nThis tool helps you compare different Generative Adversarial Networks")
-    print("for super-resolution tasks. Available options:")
+    print("\nThis tool helps you compare different apporaches to super resolution (SR).")
+    print("Available options:")
     print("1. SRGAN")
     print("2. Real-ESRGAN")
-    print("3. Real-ESRGAN")
-    print("4. Real-ESRGAN")
-    print("5. Real-ESRGAN")
-    print("6. Real-ESRGAN")
-    print("7. Real-ESRGAN")
-    print("8. Real-ESRGAN")
-    print("\nPlease select which GAN you'd like to use:")
+    print("3. RCAN")
+    print("4. SwinIR")
+    print("5. HAT")
+    print("6. ZSSR")
+    print("7. DIPNet")
+    print("8. SinSR")
+    print("\nPlease select which approach you'd like to use:")
 
 def get_gan_choice():
     while True:
@@ -209,12 +216,13 @@ def handle_real_esrgan(mode):
     if mode == 'train':
         print("\nTraining Real-ESRGAN with the following options:")
         # epochs = get_integer("Number of epochs [100]: ", 100)
-        crop_size = get_integer("Crop size [88]: ", 88)
-        batch_size = get_integer("Batch size [48]: ", 48) 
+        crop_size = get_integer("Crop size [64]: ", 64)
+        batch_size = get_integer("Batch size [16]: ", 16) 
         upscale = get_integer("Upscale factor [4]: ", 4)
         # Num batches per epoch = total num images // batch_size
-        warmup = get_integer("Warmup batches [400]: ", 400) # Num batches per epoch * desired num of epochs
-        total_batches = get_integer("Total batches [711]: ", 711)
+        resume_batch = get_integer("Resume from stopped training [0]: ", 0)
+        warmup = get_integer("Warmup batches [1000]: ", 1000) # Num batches per epoch * desired num of epochs
+        total_batches = get_integer("Total batches [1200]: ", 1200)
         res_blocks = get_integer("Number of residual blocks [23]: ", 23)
         lr = get_float("Learning rate [0.0002]: ", 0.0002)
         name = get_string("Name of Directory: ", "")
@@ -236,6 +244,7 @@ def handle_real_esrgan(mode):
             "--crop_size", str(crop_size),
             "--batch_size", str(batch_size),
             "--upscale_factor", str(upscale),
+            "--batch", str(resume_batch),
             "--warmup_batches", str(warmup),
             "--n_batches", str(total_batches),
             "--lr", str(lr),
@@ -244,7 +253,11 @@ def handle_real_esrgan(mode):
         
     else:  # inference
         input_path = get_input_path("Path to input image, directory, or video: ")
-        model_name = get_string("Model name [generator_720.pth]: ", "generator_720.pth")
+        num_batches = get_integer("How many batches did you train?: ", 1200)
+        len_train = get_integer("How many batches per iteration were there?: ", 45)
+        num_batches_mod = num_batches % len_train
+        n_batch = num_batches + num_batches_mod + 5
+        model_name = get_string(f"Model name [generator_{n_batch}.pth]: ", f"generator_{n_batch}.pth")
         test_mode = get_yes_no("Use GPU acceleration? [y/n]: ", True)
         
         # Supported image extensions
@@ -269,6 +282,7 @@ def handle_real_esrgan(mode):
                 print(f"\nProcessing: {img_file}")
                 subprocess.run([
                     "python", "ext/Real-ESRGAN/test_images.py",
+                    "--n_batch", str(num_batches),
                     "--image_name", img_path,
                     "--model_name", model_name,
                     "--test_mode", "GPU" if test_mode else "CPU"
@@ -303,10 +317,29 @@ def handle_real_esrgan(mode):
             print("\n[Testing Real-ESRGAN]")
             subprocess.run([
                 "python", "ext/Real-ESRGAN/test_images.py",
+                "--n_batch", str(num_batches),
                 "--image_name", input_path,
                 "--model_name", model_name,
                 "--test_mode", "GPU" if test_mode else "CPU"
             ])
+
+def handle_rcan(mode):
+    pass
+
+def handle_swinIR(mode):
+    pass
+
+def handle_hat(mode):
+    pass
+
+def handle_zssr(mode):
+    pass
+
+def handle_dipNet(mode):
+    pass
+
+def handle_sinSR(mode):
+    pass
 
 def main():
     print_welcome()
@@ -317,6 +350,18 @@ def main():
         handle_srgan(mode)
     elif gan_choice == GANType.REAL_ESRGAN:
         handle_real_esrgan(mode)
+    elif gan_choice == GANType.RCAN:
+        handle_rcan(mode)
+    elif gan_choice == GANType.SwinIR:
+        handle_swinIR(mode)
+    elif gan_choice == GANType.HAT:
+        handle_hat(mode)
+    elif gan_choice == GANType.ZSSR:
+        handle_zssr(mode)
+    elif gan_choice == GANType.DIPNet:
+        handle_dipNet(mode)
+    elif gan_choice == GANType.SinSR:
+        handle_sinSR(mode)
     
     print("\nOperation completed!")
 

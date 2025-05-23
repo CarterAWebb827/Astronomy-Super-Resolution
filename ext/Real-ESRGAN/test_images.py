@@ -16,6 +16,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 parser = argparse.ArgumentParser(description='Test Single Image')
 parser.add_argument('--test_mode', default='GPU', choices=['CPU', 'GPU'], help='Using CPU or GPU')
+parser.add_argument('--n_batch', type=int, default=1200)
 parser.add_argument('--image_name', required=True, help='Input image path')
 parser.add_argument('--model_name', default='generator_720.pth', help='Generator model name')
 parser.add_argument('--tile_size', type=int, default=512, help='Tile size for processing')
@@ -24,8 +25,9 @@ args = parser.parse_args()
 
 # Configuration
 base = Path(__file__).parents[2]
-model_path = base / "models" / "real-esrgan" / "711" / args.model_name
-output_dir = base / "output" / "real-esrgan" / args.model_name
+N_BATCH = args.n_batch
+model_path = base / "models" / "real-esrgan" / str(N_BATCH) / args.model_name
+output_dir = base / "output" / "real-esrgan" / str(N_BATCH) / args.model_name
 output_dir.mkdir(parents=True, exist_ok=True)
 
 # Load model
@@ -38,7 +40,7 @@ else:
 model.load_state_dict(state_dict)
 
 def process_large_image(model, image_path, scale=4, tile_size=512, overlap=32):
-    """Process large images in tiles to avoid memory issues"""
+    # Process large images in tiles to avoid memory issues
     img = Image.open(image_path).convert('RGB')
     width, height = img.size
     tile_size = min(tile_size, width, height)
@@ -58,7 +60,7 @@ def process_large_image(model, image_path, scale=4, tile_size=512, overlap=32):
             # Process tile
             with torch.no_grad():
                 input_tensor = ToTensor()(tile).unsqueeze(0)
-                if TEST_MODE:
+                if args.test_mode:
                     input_tensor = input_tensor.cuda()
                 
                 # Process with model
