@@ -309,7 +309,147 @@ def handle_real_esrgan(mode):
             ])
 
 def handle_swinIR(mode):
-    pass
+    print("\nSwinIR selected (state-of-the-art image restoration)")
+    
+    if mode == 'train':
+        print("\nNote: SwinIR training requires specialized setup and large datasets.")
+        print("For most users, we recommend using pretrained models for inference.")
+        proceed = get_yes_no("Continue with training setup? [y/n]: ", False)
+        if not proceed:
+            return
+        
+        # Training parameters would go here
+        # (SwinIR training is complex and typically requires config files)
+        # print("\nSwinIR training requires manual configuration files.")
+        # print("Please refer to the official SwinIR repository for training setup.")
+        
+    else:  # inference
+        # Get input path
+        input_path = get_input_path("Path to input image or directory: ")
+        
+        # Supported image extensions
+        image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff')
+        
+        # Task selection
+        print("\nAvailable SwinIR tasks:")
+        print("1. DFO only, GAN with dict keys + params, and params ema")
+        print("2. DFO only, PSNR with dict keys + params, and params ema")
+        print("3. DFO with MFC, GAN with dict keys + params, and params ema")
+        print("4. DFO with MFC, PSNR with dict keys + params, and params ema")
+        task_choice = get_integer("Select model [1-4]: ", 1)
+        
+        tasks = {
+            1: 'classical_sr',
+            2: 'real_sr'
+        }
+        task = tasks[task_choice]
+        
+        scale = get_integer("Upscale factor [2, 3, 4, 8]: ", 4)
+        noise = None
+        jpeg = None
+        
+        # Model options
+        large_model = False
+        if task == 'real_sr':
+            large_model = get_yes_no("Use large model? (better quality but more memory) [y/n]: ", True)
+        
+        # Tile settings for large images
+        tile_size = get_integer("Tile size for processing (0 for no tiling) [0 or 128-512]: ", 0)
+        tile_overlap = 32 if tile_size > 0 else 0
+        
+        # GPU acceleration
+        test_mode = get_yes_no("Use GPU acceleration? [y/n]: ", True)
+        
+        if os.path.isdir(input_path):
+            # Handle directory case
+            print(f"\nProcessing all images in directory: {input_path}")
+            image_files = [f for f in os.listdir(input_path) 
+                         if f.lower().endswith(image_extensions)]
+            
+            if not image_files:
+                print("No valid image files found in the directory!")
+                return
+            
+            print(f"Found {len(image_files)} images to process")
+            
+            for img_file in image_files:
+                img_path = os.path.join(input_path, img_file)
+                print(f"\nProcessing: {img_file}")
+                
+                cmd = [
+                    "python", "ext/SwinIR/main_test_swinir.py",
+                    "--task", task,
+                    "--scale", str(scale),
+                    "--folder_lq", input_path
+                ]
+                
+                if large_model:
+                    cmd.append("--large_model")
+                
+                if tile_size > 0:
+                    cmd.extend([
+                        "--tile", str(tile_size),
+                        "--tile_overlap", str(tile_overlap)
+                    ])
+                
+                subprocess.run(cmd)
+            
+            print("\nFinished processing all images in directory")
+        else:
+            # Handle single image case
+            if not input_path.lower().endswith(image_extensions):
+                print("\nWarning: File extension not recognized as supported image format!")
+                proceed = get_yes_no("Continue anyway? [y/n]: ", False)
+                if not proceed:
+                    return
+            
+            print("\nRunning SwinIR inference with:")
+            print(f"- Task: {task}")
+            if scale: print(f"- Scale: {scale}")
+            if noise: print(f"- Noise level: {noise}")
+            if jpeg: print(f"- JPEG quality: {jpeg}")
+            print(f"- GPU acceleration: {'Yes' if test_mode else 'No'}")
+            if tile_size > 0: 
+                print(f"- Tile processing: {tile_size}x{tile_size} with {tile_overlap}px overlap")
+            
+            # Create temp directory for single image processing
+            import tempfile
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Create input structure SwinIR expects
+                input_dir = os.path.join(temp_dir, "input")
+                os.makedirs(input_dir, exist_ok=True)
+                
+                # Copy/link the input image
+                import shutil
+                shutil.copy(input_path, input_dir)
+                
+                cmd = [
+                    "python", "main_test_swinir.py",
+                    "--task", task,
+                    "--scale", str(scale),
+                    "--folder_lq", input_dir
+                ]
+                
+                if large_model:
+                    cmd.append("--large_model")
+                
+                if tile_size > 0:
+                    cmd.extend([
+                        "--tile", str(tile_size),
+                        "--tile_overlap", str(tile_overlap)
+                    ])
+                
+                print("\n[Testing SwinIR]")
+                subprocess.run(cmd)
+                
+                # Copy results back to original directory
+                output_dir = os.path.join(temp_dir, "results", f"swinir_{task}_x{scale}")
+                for result_file in os.listdir(output_dir):
+                    src = os.path.join(output_dir, result_file)
+                    dst = os.path.join(os.path.dirname(input_path), 
+                                     f"swinir_{os.path.splitext(os.path.basename(input_path))[0]}.png")
+                    shutil.copy(src, dst)
+                    print(f"\nSaved result to: {dst}")
 
 def handle_hat(mode):
     pass
