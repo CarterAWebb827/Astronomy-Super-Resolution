@@ -11,7 +11,6 @@ from model import GeneratorRRDB
 
 # Set memory optimization flags
 os.environ['PYTORCH_HIP_ALLOC_CONF'] = 'expandable_segments:True'
-torch.backends.cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
 
 parser = argparse.ArgumentParser(description='Test Single Image')
@@ -39,7 +38,9 @@ else:
     state_dict = torch.load(model_path, map_location='cpu', weights_only=False)
 model.load_state_dict(state_dict)
 
-def process_large_image(model, image_path, scale=4, tile_size=512, overlap=32):
+def process_large_image(model, image_path, scale=4, tile_size=64, overlap=32):
+    torch.backends.cudnn.benchmark = True
+
     # Process large images in tiles to avoid memory issues
     img = Image.open(image_path).convert('RGB')
     width, height = img.size
@@ -78,32 +79,34 @@ def process_large_image(model, image_path, scale=4, tile_size=512, overlap=32):
             del input_tensor, output, out_tile
             torch.cuda.empty_cache()
     
+    torch.backends.cudnn.benchmark = False
+
     return out_img
 
 # Process image
 try:
-    if Path(args.image_name).stat().st_size > 50 * 1024 * 1024:  # >50MB
-        print("Processing large image with tiling...")
-        result = process_large_image(
-            model, 
-            args.image_name,
-            tile_size=args.tile_size,
-            overlap=args.overlap
-        )
-    else:
-        print("Processing normally...")
-        with torch.no_grad():
-            img = Image.open(args.image_name).convert('RGB')
-            tensor = ToTensor()(img).unsqueeze(0)
-            if args.test_mode == 'GPU':
-                tensor = tensor.cuda()
-            result = ToPILImage()(model(tensor)[0].cpu().clamp(0, 1))
+    print("Processing normally...")
+    with torch.no_grad():
+        img = Image.open(args.image_name).convert('RGB')
+        tensor = ToTensor()(img).unsqueeze(0)
+        if args.test_mode == 'GPU':
+            tensor = tensor.cuda()
+        result = ToPILImage()(model(tensor)[0].cpu().clamp(0, 1))
     
     # Save result
     output_path = output_dir / f"out_{Path(args.image_name).name}"
     result.save(output_path)
     print(f"Saved result to {output_path}")
-
 except RuntimeError as e:
     print(f"Memory error: {e}")
-    print("Try reducing tile size with --tile_size 256 or --tile_size 128")
+    print("Processing large image with tiling...")
+    result = process_large_image(
+        model, 
+        args.image_name,
+        tile_size=args.tile_size,
+        overlap=args.overlap
+    )
+
+    output_path = output_dir + "/" + f"out_{Path(args.image_name).name}"
+    result.save(output_path)
+    print(f"Saved result to {output_path}")

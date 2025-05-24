@@ -6,13 +6,12 @@ from enum import Enum
 class GANType(Enum):
     SRGAN = 1
     REAL_ESRGAN = 2
-    RCAN = 3
-    SwinIR = 4
-    HAT = 5
-    ZSSR = 6
-    DIPNet = 7
-    SinSR = 8
-    StableSR = 9
+    SwinIR = 3
+    HAT = 4
+    ZSSR = 5
+    DIPNet = 6
+    SinSR = 7
+    StableSR = 8
 
 def print_welcome():
     print("\n" + "="*50)
@@ -22,12 +21,12 @@ def print_welcome():
     print("Available options:")
     print("1. SRGAN")
     print("2. Real-ESRGAN")
-    print("3. RCAN")
-    print("4. SwinIR")
-    print("5. HAT")
-    print("6. ZSSR")
-    print("7. DIPNet")
-    print("8. SinSR")
+    print("3. SwinIR")
+    print("4. HAT")
+    print("5. ZSSR")
+    print("6. DIPNet")
+    print("7. SinSR")
+    print("8. StableSR")
     print("\nPlease select which approach you'd like to use:")
 
 def get_gan_choice():
@@ -133,7 +132,7 @@ def handle_srgan(mode):
         if up == 2:
             name = get_string("Model name [netG_epoch_2_100.pth]: ", "netG_epoch_2_100.pth")
         else:
-            name = get_string("Model name [netG_epoch_4_100.pth]: ", "netG_epoch_4_100.pth")
+            name = get_string("Model name [netG_epoch_4_250.pth]: ", "netG_epoch_4_250.pth")
         memory = get_float("Percentage use of GPU [0.9]: ", 0.9)
         direc = get_string("Model directory: ", "")
 
@@ -262,8 +261,6 @@ def handle_real_esrgan(mode):
         
         # Supported image extensions
         image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff')
-        # Supported video extensions
-        # video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.flv')
         
         if os.path.isdir(input_path):
             # Handle directory case
@@ -289,18 +286,6 @@ def handle_real_esrgan(mode):
                 ])
             
             print("\nFinished processing all images in directory")
-        
-        # elif input_path.lower().endswith(video_extensions):
-        #     # Handle video case
-        #     print("\nRunning Real-ESRGAN video processing with:")
-        #     print(f"- Input video: {input_path}")
-        #     print(f"- Model name: {model_name}")
-        #     print(f"- GPU acceleration: {'Yes' if test_mode else 'No'}")
-            
-        #     print("\n[Processing Video]")
-        #     # Note: You would need to implement or point to a video processing script
-        #     print("Video processing not implemented in this example")
-        
         else:
             # Handle single image case
             if not input_path.lower().endswith(image_extensions):
@@ -323,9 +308,6 @@ def handle_real_esrgan(mode):
                 "--test_mode", "GPU" if test_mode else "CPU"
             ])
 
-def handle_rcan(mode):
-    pass
-
 def handle_swinIR(mode):
     pass
 
@@ -339,6 +321,9 @@ def handle_dipNet(mode):
     pass
 
 def handle_sinSR(mode):
+    pass    
+
+def handle_stableSR(mode):
     pass
 
 def main():
@@ -350,8 +335,6 @@ def main():
         handle_srgan(mode)
     elif gan_choice == GANType.REAL_ESRGAN:
         handle_real_esrgan(mode)
-    elif gan_choice == GANType.RCAN:
-        handle_rcan(mode)
     elif gan_choice == GANType.SwinIR:
         handle_swinIR(mode)
     elif gan_choice == GANType.HAT:
@@ -362,6 +345,8 @@ def main():
         handle_dipNet(mode)
     elif gan_choice == GANType.SinSR:
         handle_sinSR(mode)
+    elif gan_choice == GANType.StableSR:
+        handle_stableSR(mode)
     
     print("\nOperation completed!")
 

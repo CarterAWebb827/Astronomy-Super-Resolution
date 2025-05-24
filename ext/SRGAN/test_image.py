@@ -10,6 +10,10 @@ from torchvision.transforms import ToTensor, ToPILImage
 
 from model import Generator
 
+# Set memory optimization flags
+os.environ['PYTORCH_HIP_ALLOC_CONF'] = 'expandable_segments:True'
+torch.backends.cuda.matmul.allow_tf32 = True
+
 parser = argparse.ArgumentParser(description='Test Single Image')
 parser.add_argument('--upscale_factor', default=4, type=int, help='super resolution upscale factor')
 parser.add_argument('--test_mode', default='GPU', type=str, choices=['GPU', 'CPU'], help='using GPU or CPU')
@@ -67,14 +71,85 @@ image = Variable(ToTensor()(image), volatile=True).unsqueeze(0)
 if TEST_MODE:
     image = image.cuda()
 
+def process_large_image(model, image_path, scale=4, tile_size=64, overlap=32):
+    torch.backends.cudnn.benchmark = True
+
+    # Process large images in tiles to avoid memory issues
+    img = Image.open(image_path).convert('RGB')
+    width, height = img.size
+    tile_size = min(tile_size, width, height)
+    
+    # Create output canvas
+    out_img = Image.new('RGB', (width*scale, height*scale))
+    
+    # Process each tile
+    for y in range(0, height, tile_size - overlap):
+        for x in range(0, width, tile_size - overlap):
+            # Get tile with overlap
+            box = (x, y, 
+                   min(x + tile_size, width), 
+                   min(y + tile_size, height))
+            tile = img.crop(box)
+            
+            # Process tile
+            with torch.no_grad():
+                input_tensor = ToTensor()(tile).unsqueeze(0)
+                if opt.test_mode:
+                    input_tensor = input_tensor.cuda()
+                
+                # Process with model
+                output = model(input_tensor)
+                output = torch.clamp(output, 0, 1)
+                out_tile = ToPILImage()(output[0].cpu())
+            
+            # Paste into output image with overlap handling
+            out_box = (x*scale, y*scale, 
+                       (x + tile_size)*scale, 
+                       (y + tile_size)*scale)
+            out_img.paste(out_tile, (x*scale, y*scale))
+            
+            # Clean up
+            del input_tensor, output, out_tile
+            torch.cuda.empty_cache()
+    
+    torch.backends.cudnn.benchmark = False
+
+    return out_img
+
+try:
+    print("Processing normally...")
+    with torch.no_grad():
+        img = Image.open(opt.image_name).convert('RGB')
+        tensor = ToTensor()(img).unsqueeze(0)
+        if opt.test_mode == 'GPU':
+            tensor = tensor.cuda()
+        result = ToPILImage()(model(tensor)[0].cpu().clamp(0, 1))
+    
+    # Save result
+    output_path = output_dir + "/" + f"out_{Path(opt.image_name).name}"
+    result.save(output_path)
+    print(f"Saved result to {output_path}")
+except RuntimeError as e:
+    print(f"Memory error: {e}")
+    print("Processing large image with tiling...")
+    result = process_large_image(
+        model, 
+        opt.image_name,
+        # tile_size=opt.tile_size,
+        # overlap=opt.overlap
+    )
+
+    output_path = output_dir + "/" + f"out_{Path(opt.image_name).name}"
+    result.save(output_path)
+    print(f"Saved result to {output_path}")
 
 # Time the processing
-start = time.time()
-out = model(image)
-elapsed = time.time() - start
-print(f'Processing time: {elapsed:.2f}s')
+# start = time.time()
+# out = model(image)
+# elapsed = time.time() - start
+# print(f'Processing time: {elapsed:.2f}s')
 
 # Save output
-out_img = ToPILImage()(out[0].data.cpu())
-out_img.save(output_path)
-print(f"Upscaled image saved to: {output_path}")
+# out_img = ToPILImage()(out[0].data.cpu())
+# out_img.save(output_path)
+# print(f"Upscaled image saved to: {output_path}")
