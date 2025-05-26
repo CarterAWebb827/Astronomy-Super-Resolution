@@ -7,11 +7,9 @@ class GANType(Enum):
     SRGAN = 1
     REAL_ESRGAN = 2
     SwinIR = 3
-    HAT = 4
-    ZSSR = 5
-    DIPNet = 6
-    SinSR = 7
-    StableSR = 8
+    DIPNet = 4
+    SinSR = 5
+    StableSR = 6
 
 def print_welcome():
     print("\n" + "="*50)
@@ -22,20 +20,18 @@ def print_welcome():
     print("1. SRGAN")
     print("2. Real-ESRGAN")
     print("3. SwinIR")
-    print("4. HAT")
-    print("5. ZSSR")
-    print("6. DIPNet")
-    print("7. SinSR")
-    print("8. StableSR")
+    print("4. DIPNet")
+    print("5. SinSR")
+    print("6. StableSR")
     print("\nPlease select which approach you'd like to use:")
 
 def get_gan_choice():
     while True:
         try:
-            choice = int(input("Enter a number (1-8): "))
-            if choice in [1, 2, 3, 4, 5, 6, 7, 8]:
+            choice = int(input("Enter a number (1-6): "))
+            if choice in [1, 2, 3, 4, 5, 6]:
                 return GANType(choice)
-            print("Please enter a valid number (1-8)")
+            print("Please enter a valid number (1-6)")
         except ValueError:
             print("Please enter a number")
 
@@ -339,19 +335,30 @@ def handle_swinIR(mode):
         task_choice = get_integer("Select model [1-4]: ", 1)
         
         tasks = {
-            1: 'classical_sr',
-            2: 'real_sr'
+            1: '003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x4_GAN-with-dict-keys-params-and-params_ema.pth',
+            2: '003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x4_PSNR-with-dict-keys-params-and-params_ema.pth',
+            3: '003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_GAN-with-dict-keys-params-and-params_ema.pth',
+            4: '003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_PSNR-with-dict-keys-params-and-params_ema.pth'
         }
+        
+        if task_choice == 1:
+            dir_name = "DFO_GAN"
+            large_model = False
+        elif task_choice == 2:
+            dir_name = "DFO_PSNR"
+            large_model = False
+        elif task_choice == 3:
+            dir_name = "DFOWMFC_GAN"
+            large_model = True
+        else:
+            dir_name = "DFOWMFC_PSNR"
+            large_model = True
+
         task = tasks[task_choice]
         
         scale = get_integer("Upscale factor [2, 3, 4, 8]: ", 4)
         noise = None
         jpeg = None
-        
-        # Model options
-        large_model = False
-        if task == 'real_sr':
-            large_model = get_yes_no("Use large model? (better quality but more memory) [y/n]: ", True)
         
         # Tile settings for large images
         tile_size = get_integer("Tile size for processing (0 for no tiling) [0 or 128-512]: ", 0)
@@ -378,9 +385,11 @@ def handle_swinIR(mode):
                 
                 cmd = [
                     "python", "ext/SwinIR/main_test_swinir.py",
-                    "--task", task,
+                    "--task", "real_sr",
                     "--scale", str(scale),
-                    "--folder_lq", input_path
+                    "--folder_lq", input_path,
+                    "--model_name", task,
+                    "--dir_name", dir_name
                 ]
                 
                 if large_model:
@@ -425,9 +434,11 @@ def handle_swinIR(mode):
                 
                 cmd = [
                     "python", "main_test_swinir.py",
-                    "--task", task,
+                    "--task", "real_sr",
                     "--scale", str(scale),
-                    "--folder_lq", input_dir
+                    "--folder_lq", input_dir,
+                    "--model_name", task,
+                    "--dir_name", dir_name
                 ]
                 
                 if large_model:
@@ -450,9 +461,6 @@ def handle_swinIR(mode):
                                      f"swinir_{os.path.splitext(os.path.basename(input_path))[0]}.png")
                     shutil.copy(src, dst)
                     print(f"\nSaved result to: {dst}")
-
-def handle_hat(mode):
-    pass
 
 def handle_zssr(mode):
     pass
@@ -477,11 +485,7 @@ def main():
         handle_real_esrgan(mode)
     elif gan_choice == GANType.SwinIR:
         handle_swinIR(mode)
-    elif gan_choice == GANType.HAT:
-        handle_hat(mode)
     elif gan_choice == GANType.ZSSR:
-        handle_zssr(mode)
-    elif gan_choice == GANType.DIPNet:
         handle_dipNet(mode)
     elif gan_choice == GANType.SinSR:
         handle_sinSR(mode)
