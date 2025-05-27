@@ -3,6 +3,8 @@ import subprocess
 import sys
 from enum import Enum
 
+base = os.path.dirname(__file__)
+
 class GANType(Enum):
     SRGAN = 1
     REAL_ESRGAN = 2
@@ -35,14 +37,17 @@ def get_gan_choice():
         except ValueError:
             print("Please enter a number")
 
-def get_mode():
+def get_mode(choice):
     while True:
-        mode = input("\nDo you want to (t)rain or (i)nference? [t/i]: ").lower()
-        if mode in ['t', 'train']:
-            return 'train'
-        elif mode in ['i', 'inference']:
-            return 'inference'
-        print("Please enter 't' for train or 'i' for inference")
+        if choice < 3:
+            mode = input("\nDo you want to (t)rain or (i)nference? [t/i]: ").lower()
+            if mode in ['t', 'train']:
+                return 'train'
+            elif mode in ['i', 'inference']:
+                return 'inference'
+            print("Please enter 't' for train or 'i' for inference")
+        else:
+            return "i"
 
 def get_input_path(prompt):
     while True:
@@ -307,166 +312,160 @@ def handle_real_esrgan(mode):
 def handle_swinIR(mode):
     print("\nSwinIR selected (state-of-the-art image restoration)")
     
-    if mode == 'train':
-        print("\nNote: SwinIR training requires specialized setup and large datasets.")
-        print("For most users, we recommend using pretrained models for inference.")
-        proceed = get_yes_no("Continue with training setup? [y/n]: ", False)
-        if not proceed:
+    # Get input path
+    input_path = get_input_path("Path to input image or directory: ")
+    
+    # Supported image extensions
+    image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff')
+    
+    # Task selection
+    print("\nAvailable SwinIR tasks:")
+    print("1. DFO only, GAN with dict keys + params, and params ema")
+    print("2. DFO only, PSNR with dict keys + params, and params ema")
+    print("3. DFO with MFC, GAN with dict keys + params, and params ema")
+    print("4. DFO with MFC, PSNR with dict keys + params, and params ema")
+    task_choice = get_integer("Select model [1-4]: ", 1)
+    
+    tasks = {
+        1: '003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x4_GAN-with-dict-keys-params-and-params_ema.pth',
+        2: '003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x4_PSNR-with-dict-keys-params-and-params_ema.pth',
+        3: '003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_GAN-with-dict-keys-params-and-params_ema.pth',
+        4: '003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_PSNR-with-dict-keys-params-and-params_ema.pth'
+    }
+    
+    if task_choice == 1:
+        dir_name = "DFO_GAN"
+        large_model = False
+    elif task_choice == 2:
+        dir_name = "DFO_PSNR"
+        large_model = False
+    elif task_choice == 3:
+        dir_name = "DFOWMFC_GAN"
+        large_model = True
+    else:
+        dir_name = "DFOWMFC_PSNR"
+        large_model = True
+
+    task = tasks[task_choice]
+    
+    scale = get_integer("Upscale factor [2, 3, 4, 8]: ", 4)
+    noise = None
+    jpeg = None
+    
+    # Tile settings for large images
+    tile_size = get_integer("Tile size for processing (0 for no tiling) [0 or 128-512]: ", 0)
+    tile_overlap = 32 if tile_size > 0 else 0
+    
+    # GPU acceleration
+    test_mode = get_yes_no("Use GPU acceleration? [y/n]: ", True)
+    
+    if os.path.isdir(input_path):
+        # Handle directory case
+        print(f"\nProcessing all images in directory: {input_path}")
+        image_files = [f for f in os.listdir(input_path) 
+                        if f.lower().endswith(image_extensions)]
+        
+        if not image_files:
+            print("No valid image files found in the directory!")
             return
         
-        # Training parameters would go here
-        # (SwinIR training is complex and typically requires config files)
-        # print("\nSwinIR training requires manual configuration files.")
-        # print("Please refer to the official SwinIR repository for training setup.")
+        print(f"Found {len(image_files)} images to process")
         
-    else:  # inference
-        # Get input path
-        input_path = get_input_path("Path to input image or directory: ")
-        
-        # Supported image extensions
-        image_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff')
-        
-        # Task selection
-        print("\nAvailable SwinIR tasks:")
-        print("1. DFO only, GAN with dict keys + params, and params ema")
-        print("2. DFO only, PSNR with dict keys + params, and params ema")
-        print("3. DFO with MFC, GAN with dict keys + params, and params ema")
-        print("4. DFO with MFC, PSNR with dict keys + params, and params ema")
-        task_choice = get_integer("Select model [1-4]: ", 1)
-        
-        tasks = {
-            1: '003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x4_GAN-with-dict-keys-params-and-params_ema.pth',
-            2: '003_realSR_BSRGAN_DFO_s64w8_SwinIR-M_x4_PSNR-with-dict-keys-params-and-params_ema.pth',
-            3: '003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_GAN-with-dict-keys-params-and-params_ema.pth',
-            4: '003_realSR_BSRGAN_DFOWMFC_s64w8_SwinIR-L_x4_PSNR-with-dict-keys-params-and-params_ema.pth'
-        }
-        
-        if task_choice == 1:
-            dir_name = "DFO_GAN"
-            large_model = False
-        elif task_choice == 2:
-            dir_name = "DFO_PSNR"
-            large_model = False
-        elif task_choice == 3:
-            dir_name = "DFOWMFC_GAN"
-            large_model = True
-        else:
-            dir_name = "DFOWMFC_PSNR"
-            large_model = True
-
-        task = tasks[task_choice]
-        
-        scale = get_integer("Upscale factor [2, 3, 4, 8]: ", 4)
-        noise = None
-        jpeg = None
-        
-        # Tile settings for large images
-        tile_size = get_integer("Tile size for processing (0 for no tiling) [0 or 128-512]: ", 0)
-        tile_overlap = 32 if tile_size > 0 else 0
-        
-        # GPU acceleration
-        test_mode = get_yes_no("Use GPU acceleration? [y/n]: ", True)
-        
-        if os.path.isdir(input_path):
-            # Handle directory case
-            print(f"\nProcessing all images in directory: {input_path}")
-            image_files = [f for f in os.listdir(input_path) 
-                         if f.lower().endswith(image_extensions)]
+        for img_file in image_files:
+            img_path = os.path.join(input_path, img_file)
+            print(f"\nProcessing: {img_file}")
             
-            if not image_files:
-                print("No valid image files found in the directory!")
+            cmd = [
+                "python", "ext/SwinIR/main_test_swinir.py",
+                "--task", "real_sr",
+                "--scale", str(scale),
+                "--folder_lq", input_path,
+                "--model_name", task,
+                "--dir_name", dir_name
+            ]
+            
+            if large_model:
+                cmd.append("--large_model")
+            
+            if tile_size > 0:
+                cmd.extend([
+                    "--tile", str(tile_size),
+                    "--tile_overlap", str(tile_overlap)
+                ])
+            
+            subprocess.run(cmd)
+        
+        print("\nFinished processing all images in directory")
+    else:
+        # Handle single image case
+        if not input_path.lower().endswith(image_extensions):
+            print("\nWarning: File extension not recognized as supported image format!")
+            proceed = get_yes_no("Continue anyway? [y/n]: ", False)
+            if not proceed:
                 return
+        
+        print("\nRunning SwinIR inference with:")
+        print(f"- Task: {task}")
+        if scale: print(f"- Scale: {scale}")
+        if noise: print(f"- Noise level: {noise}")
+        if jpeg: print(f"- JPEG quality: {jpeg}")
+        print(f"- GPU acceleration: {'Yes' if test_mode else 'No'}")
+        if tile_size > 0: 
+            print(f"- Tile processing: {tile_size}x{tile_size} with {tile_overlap}px overlap")
+        
+        # Create temp directory for single image processing
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create input structure SwinIR expects
+            input_dir = os.path.join(temp_dir, "input")
+            os.makedirs(input_dir, exist_ok=True)
             
-            print(f"Found {len(image_files)} images to process")
+            # Copy/link the input image
+            import shutil
+            shutil.copy(input_path, input_dir)
             
-            for img_file in image_files:
-                img_path = os.path.join(input_path, img_file)
-                print(f"\nProcessing: {img_file}")
-                
-                cmd = [
-                    "python", "ext/SwinIR/main_test_swinir.py",
-                    "--task", "real_sr",
-                    "--scale", str(scale),
-                    "--folder_lq", input_path,
-                    "--model_name", task,
-                    "--dir_name", dir_name
-                ]
-                
-                if large_model:
-                    cmd.append("--large_model")
-                
-                if tile_size > 0:
-                    cmd.extend([
-                        "--tile", str(tile_size),
-                        "--tile_overlap", str(tile_overlap)
-                    ])
-                
-                subprocess.run(cmd)
+            cmd = [
+                "python", "main_test_swinir.py",
+                "--task", "real_sr",
+                "--scale", str(scale),
+                "--folder_lq", input_dir,
+                "--model_name", task,
+                "--dir_name", dir_name
+            ]
             
-            print("\nFinished processing all images in directory")
-        else:
-            # Handle single image case
-            if not input_path.lower().endswith(image_extensions):
-                print("\nWarning: File extension not recognized as supported image format!")
-                proceed = get_yes_no("Continue anyway? [y/n]: ", False)
-                if not proceed:
-                    return
+            if large_model:
+                cmd.append("--large_model")
             
-            print("\nRunning SwinIR inference with:")
-            print(f"- Task: {task}")
-            if scale: print(f"- Scale: {scale}")
-            if noise: print(f"- Noise level: {noise}")
-            if jpeg: print(f"- JPEG quality: {jpeg}")
-            print(f"- GPU acceleration: {'Yes' if test_mode else 'No'}")
-            if tile_size > 0: 
-                print(f"- Tile processing: {tile_size}x{tile_size} with {tile_overlap}px overlap")
+            if tile_size > 0:
+                cmd.extend([
+                    "--tile", str(tile_size),
+                    "--tile_overlap", str(tile_overlap)
+                ])
             
-            # Create temp directory for single image processing
-            import tempfile
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Create input structure SwinIR expects
-                input_dir = os.path.join(temp_dir, "input")
-                os.makedirs(input_dir, exist_ok=True)
-                
-                # Copy/link the input image
-                import shutil
-                shutil.copy(input_path, input_dir)
-                
-                cmd = [
-                    "python", "main_test_swinir.py",
-                    "--task", "real_sr",
-                    "--scale", str(scale),
-                    "--folder_lq", input_dir,
-                    "--model_name", task,
-                    "--dir_name", dir_name
-                ]
-                
-                if large_model:
-                    cmd.append("--large_model")
-                
-                if tile_size > 0:
-                    cmd.extend([
-                        "--tile", str(tile_size),
-                        "--tile_overlap", str(tile_overlap)
-                    ])
-                
-                print("\n[Testing SwinIR]")
-                subprocess.run(cmd)
-                
-                # Copy results back to original directory
-                output_dir = os.path.join(temp_dir, "results", f"swinir_{task}_x{scale}")
-                for result_file in os.listdir(output_dir):
-                    src = os.path.join(output_dir, result_file)
-                    dst = os.path.join(os.path.dirname(input_path), 
-                                     f"swinir_{os.path.splitext(os.path.basename(input_path))[0]}.png")
-                    shutil.copy(src, dst)
-                    print(f"\nSaved result to: {dst}")
-
-def handle_zssr(mode):
-    pass
+            print("\n[Testing SwinIR]")
+            subprocess.run(cmd)
+            
+            # Copy results back to original directory
+            output_dir = os.path.join(temp_dir, "results", f"swinir_{task}_x{scale}")
+            for result_file in os.listdir(output_dir):
+                src = os.path.join(output_dir, result_file)
+                dst = os.path.join(os.path.dirname(input_path), 
+                                    f"swinir_{os.path.splitext(os.path.basename(input_path))[0]}.png")
+                shutil.copy(src, dst)
+                print(f"\nSaved result to: {dst}")
 
 def handle_dipNet(mode):
-    pass
+    data_dir = os.path.join(base, "data/")
+    model_id = 0
+    save_dir = os.path.join(base, "output", "dipnet")
+    os.makedirs(save_dir, exist_ok=True)
+
+    subprocess.run([
+        "python", "ext/DIPNet/test_demo.py",
+            "--data_dir", data_dir,
+            "--save_dir", save_dir,
+            "--model_id", str(model_id)
+    ])
 
 def handle_sinSR(mode):
     pass    
@@ -477,7 +476,7 @@ def handle_stableSR(mode):
 def main():
     print_welcome()
     gan_choice = get_gan_choice()
-    mode = get_mode()
+    mode = get_mode(gan_choice.value)
     
     if gan_choice == GANType.SRGAN:
         handle_srgan(mode)
@@ -485,7 +484,7 @@ def main():
         handle_real_esrgan(mode)
     elif gan_choice == GANType.SwinIR:
         handle_swinIR(mode)
-    elif gan_choice == GANType.ZSSR:
+    elif gan_choice == GANType.DIPNet:
         handle_dipNet(mode)
     elif gan_choice == GANType.SinSR:
         handle_sinSR(mode)
