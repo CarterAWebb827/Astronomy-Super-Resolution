@@ -154,7 +154,7 @@ if __name__ == "__main__":
         ],
         outputs=[
             gr.Image(type="numpy", label="Output: High Quality Image"),
-            gr.outputs.File(label="Download the output")
+            gr.File(label="Download the output")
         ],
         title=title,
         description=description,
@@ -163,6 +163,6 @@ if __name__ == "__main__":
         allow_flagging="never"
         )
 
-    demo.queue(concurrency_count=4)
+    demo.queue()
     demo.launch(share=True)
 
