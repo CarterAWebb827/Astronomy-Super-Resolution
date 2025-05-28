@@ -11,7 +11,6 @@ class GANType(Enum):
     SwinIR = 3
     SinSR = 4
     StableSR = 5
-    DIPNet = 6
 
 def print_welcome():
     print("\n" + "="*50)
@@ -24,16 +23,15 @@ def print_welcome():
     print("3. SwinIR")
     print("4. SinSR")
     print("5. StableSR")
-    print("6. DIPNet")
     print("\nPlease select which approach you'd like to use:")
 
 def get_gan_choice():
     while True:
         try:
-            choice = int(input("Enter a number (1-6): "))
-            if choice in [1, 2, 3, 4, 5, 6]:
+            choice = int(input("Enter a number (1-5): "))
+            if choice in [1, 2, 3, 4, 5]:
                 return GANType(choice)
-            print("Please enter a valid number (1-6)")
+            print("Please enter a valid number (1-5)")
         except ValueError:
             print("Please enter a number")
 
@@ -455,24 +453,14 @@ def handle_swinIR(mode):
                 print(f"\nSaved result to: {dst}")
 
 def handle_sinSR(mode):
-    pass    
+    cmd = [
+        "python", "ext/SinSR/app.py"
+    ]
+    
+    subprocess.run(cmd)
 
 def handle_stableSR(mode):
     pass
-
-def handle_dipNet(mode):
-    data_dir = os.path.join(base, "data/")
-    model_id = 0
-    save_dir = os.path.join(base, "output", "dipnet")
-    os.makedirs(save_dir, exist_ok=True)
-
-    subprocess.run([
-        "python", "ext/DIPNet/test_demo.py",
-            "--data_dir", data_dir,
-            "--save_dir", save_dir,
-            "--model_id", str(model_id),
-            "--include_test"
-    ])
 
 def main():
     print_welcome()
@@ -489,8 +477,6 @@ def main():
         handle_sinSR(mode)
     elif gan_choice == GANType.StableSR:
         handle_stableSR(mode)
-    elif gan_choice == GANType.DIPNet:
-        handle_dipNet(mode)
     
     print("\nOperation completed!")
 
