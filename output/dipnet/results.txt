@@ -1,2 +1,2 @@
-Model               	Val PSNR  	Val Time [ms] 	Params [M]	FLOPs [G] 	Acts [M]	Mem [M] 	Conv    
-00_DIPNet           	29.04     	17.31         	0.243     	14.90     	72.97   	495.91  	  39    
+Model               	Val PSNR  	Test PSNR 	Val Time [ms] 	Test Time [ms]	Ave Time [ms] 	Params [M]	FLOPs [G] 	Acts [M]	Mem [M] 	Conv    
+00_DIPNet           	9.21      	10.68     	9.16          	6.47          	7.81          	0.243     	14.90     	72.97   	200.86  	  39    

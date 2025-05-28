@@ -9,9 +9,9 @@ class GANType(Enum):
     SRGAN = 1
     REAL_ESRGAN = 2
     SwinIR = 3
-    DIPNet = 4
-    SinSR = 5
-    StableSR = 6
+    SinSR = 4
+    StableSR = 5
+    DIPNet = 6
 
 def print_welcome():
     print("\n" + "="*50)
@@ -22,9 +22,9 @@ def print_welcome():
     print("1. SRGAN")
     print("2. Real-ESRGAN")
     print("3. SwinIR")
-    print("4. DIPNet")
-    print("5. SinSR")
-    print("6. StableSR")
+    print("4. SinSR")
+    print("5. StableSR")
+    print("6. DIPNet")
     print("\nPlease select which approach you'd like to use:")
 
 def get_gan_choice():
@@ -454,6 +454,12 @@ def handle_swinIR(mode):
                 shutil.copy(src, dst)
                 print(f"\nSaved result to: {dst}")
 
+def handle_sinSR(mode):
+    pass    
+
+def handle_stableSR(mode):
+    pass
+
 def handle_dipNet(mode):
     data_dir = os.path.join(base, "data/")
     model_id = 0
@@ -464,14 +470,9 @@ def handle_dipNet(mode):
         "python", "ext/DIPNet/test_demo.py",
             "--data_dir", data_dir,
             "--save_dir", save_dir,
-            "--model_id", str(model_id)
+            "--model_id", str(model_id),
+            "--include_test"
     ])
-
-def handle_sinSR(mode):
-    pass    
-
-def handle_stableSR(mode):
-    pass
 
 def main():
     print_welcome()
@@ -484,12 +485,12 @@ def main():
         handle_real_esrgan(mode)
     elif gan_choice == GANType.SwinIR:
         handle_swinIR(mode)
-    elif gan_choice == GANType.DIPNet:
-        handle_dipNet(mode)
     elif gan_choice == GANType.SinSR:
         handle_sinSR(mode)
     elif gan_choice == GANType.StableSR:
         handle_stableSR(mode)
+    elif gan_choice == GANType.DIPNet:
+        handle_dipNet(mode)
     
     print("\nOperation completed!")
 
