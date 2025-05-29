@@ -10,7 +10,6 @@ class GANType(Enum):
     REAL_ESRGAN = 2
     SwinIR = 3
     SinSR = 4
-    StableSR = 5
 
 def print_welcome():
     print("\n" + "="*50)
@@ -22,16 +21,15 @@ def print_welcome():
     print("2. Real-ESRGAN")
     print("3. SwinIR")
     print("4. SinSR")
-    print("5. StableSR")
     print("\nPlease select which approach you'd like to use:")
 
 def get_gan_choice():
     while True:
         try:
-            choice = int(input("Enter a number (1-5): "))
-            if choice in [1, 2, 3, 4, 5]:
+            choice = int(input("Enter a number (1-4): "))
+            if choice in [1, 2, 3, 4, 4]:
                 return GANType(choice)
-            print("Please enter a valid number (1-5)")
+            print("Please enter a valid number (1-4)")
         except ValueError:
             print("Please enter a number")
 
@@ -459,8 +457,6 @@ def handle_sinSR(mode):
     
     subprocess.run(cmd)
 
-def handle_stableSR(mode):
-    pass
 
 def main():
     print_welcome()
@@ -475,8 +471,6 @@ def main():
         handle_swinIR(mode)
     elif gan_choice == GANType.SinSR:
         handle_sinSR(mode)
-    elif gan_choice == GANType.StableSR:
-        handle_stableSR(mode)
     
     print("\nOperation completed!")
 
