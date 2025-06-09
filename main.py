@@ -1,13 +1,13 @@
 import os
 import subprocess
 from enum import Enum
-import tempfile
 import cv2
 import numpy as np
 import pandas as pd
 from typing import Union, List, Dict, Optional, Tuple
 import matplotlib.pyplot as plt
 import glob
+from typing import Optional
 
 from eval import SREvaluator
 
@@ -887,64 +887,7 @@ def handle_evaluation():
     print("Super Resolution Evaluation".center(50))
     print("="*50)
     
-    eval_mode = get_evaluation_mode()
-    
-    if eval_mode == 1:
-        # Single image evaluation
-        handle_single_image_evaluation()
-    elif eval_mode == 2:
-        # Batch evaluation
-        handle_batch_evaluation()
-    elif eval_mode == 3:
-        # Model comparison
-        handle_model_comparison()
-
-def handle_single_image_evaluation():
-    # Handle single image evaluation.
-    print("\n--- Single Image Evaluation ---")
-    
-    # Get SR image path
-    sr_path = None
-    while sr_path is None:
-        path_input = input("Enter path to SR image (relative to images/ folder): ")
-        sr_path = os.path.join(base, "images", path_input)
-        if not os.path.exists(sr_path):
-            print(f"File not found: {sr_path}")
-            sr_path = None
-    
-    # Get ground truth directory (optional)
-    gt_dir = None
-    if get_yes_no("Do you have ground truth images for comparison? [y/n]: "):
-        gt_input = input("Enter path to ground truth directory (relative to images/ folder): ")
-        gt_dir = os.path.join(base, "images", gt_input)
-        if not os.path.exists(gt_dir):
-            print(f"Ground truth directory not found: {gt_dir}")
-            gt_dir = None
-    
-    # Get model and image names
-    model_name = get_string("Enter model name (e.g., SwinIR, SRGAN): ", "Unknown")
-    image_name = get_string("Enter image name (without extension): ", 
-                           os.path.splitext(os.path.basename(sr_path))[0])
-    
-    # Get output directory
-    output_dir = get_string("Enter output directory for results [evaluation_results]: ", 
-                           "evaluation_results")
-    
-    # Run evaluation
-    print(f"\nEvaluating {sr_path}...")
-    try:
-        results, _ = evaluate_sr(
-            input_data=sr_path,
-            gt_dir=gt_dir,
-            output_dir=output_dir,
-            model_name=model_name,
-            image_name=image_name,
-            save_report=True,
-            verbose=True
-        )
-        print(f"\nEvaluation complete! Results saved to {output_dir}/")
-    except Exception as e:
-        print(f"Evaluation failed: {str(e)}")
+    handle_batch_evaluation()
 
 def handle_batch_evaluation():
     # Handle batch evaluation of multiple images.
@@ -1016,106 +959,101 @@ def handle_batch_evaluation():
     except Exception as e:
         print(f"Batch evaluation failed: {str(e)}")
 
-def handle_model_comparison():
-    # Handle comparison between different SR models.
-    print("\n--- Model Comparison ---")
+def combine_model_summaries(base_dir: str, output_filename: Optional[str] = None) -> pd.DataFrame:
+    # Set default output filename if not provided
+    if output_filename is None:
+        output_filename = "combined_model_summary.csv"
     
-    # Get model directories
-    model_dirs = []
-    print("Enter directories for each model you want to compare:")
-    print("(Press Enter with empty input when done)")
+    # Find all model_summary.csv files
+    summary_files = []
+    for root, _, files in os.walk(base_dir):
+        if "model_summary.csv" in files:
+            summary_files.append(os.path.join(root, "model_summary.csv"))
     
-    while True:
-        model_input = input(f"Model {len(model_dirs)+1} directory (relative to images/): ")
-        if not model_input:
-            break
+    if not summary_files:
+        print(f"No model_summary.csv files found in {base_dir}")
+        return pd.DataFrame()
+    
+    print(f"Found {len(summary_files)} model_summary.csv files to combine")
+    
+    # Read and combine all files with cleaning
+    combined_df = pd.DataFrame()
+    header_row_added = False
+    
+    for file in summary_files:
+        try:
+            # Read the CSV file
+            df = pd.read_csv(file)
             
-        model_dir = os.path.join(base, "images", model_input)
-        if os.path.exists(model_dir):
-            model_dirs.append(model_dir)
-            print(f"Added: {model_dir}")
-        else:
-            print(f"Directory not found: {model_dir}")
-    
-    if len(model_dirs) < 2:
-        print("Need at least 2 model directories for comparison!")
-        return
-    
-    # Collect all image files from all model directories
-    all_image_files = []
-    for model_dir in model_dirs:
-        model_files = get_image_files(model_dir)
-        all_image_files.extend(model_files)
-    
-    if not all_image_files:
-        print("No image files found in the model directories!")
-        return
-    
-    print(f"Found {len(all_image_files)} total images across {len(model_dirs)} models")
-    
-    # Get ground truth directory (optional)
-    gt_dir = None
-    if get_yes_no("Do you have ground truth images for comparison? [y/n]: "):
-        gt_input = input("Enter path to ground truth directory (relative to images/ folder): ")
-        gt_dir = os.path.join(base, "images", gt_input)
-        if not os.path.exists(gt_dir):
-            print(f"Ground truth directory not found: {gt_dir}")
-            gt_dir = None
-    
-    # Get output directory
-    output_dir = get_string("Enter output directory for comparison results [model_comparison]: ", 
-                           "model_comparison")
-    
-    # Run model comparison
-    print(f"\nComparing {len(model_dirs)} models...")
-    try:
-        results, df = evaluate_sr(
-            input_data=all_image_files,
-            gt_dir=gt_dir,
-            output_dir=output_dir,
-            save_report=True,
-            verbose=True
-        )
-        
-        if df is not None and len(df) > 0:
-            print(f"\nModel comparison complete!")
-            print(f"Results saved to {output_dir}/")
+            # Add source directory as a column
+            df['source_directory'] = os.path.dirname(file)
             
-            # Print comparison summary
-            print(f"\nComparison Summary:")
-            print("-" * 40)
-            
-            models = df['model'].unique()
-            for model in models:
-                model_data = df[df['model'] == model]
-                print(f"\n{model}:")
-                print(f"  Images evaluated: {len(model_data)}")
-                if 'PSNR' in df.columns:
-                    print(f"  Average PSNR: {model_data['PSNR'].mean():.2f} ± {model_data['PSNR'].std():.2f} dB")
-                if 'SSIM' in df.columns:
-                    print(f"  Average SSIM: {model_data['SSIM'].mean():.4f} ± {model_data['SSIM'].std():.4f}")
-            
-            # Find best performing model
-            if 'PSNR' in df.columns:
-                best_psnr_model = df.groupby('model')['PSNR'].mean().idxmax()
-                print(f"\nBest PSNR: {best_psnr_model}")
-            if 'SSIM' in df.columns:
-                best_ssim_model = df.groupby('model')['SSIM'].mean().idxmax()
-                print(f"Best SSIM: {best_ssim_model}")
+            # Process each row
+            for idx, row in df.iterrows():
+                first_col_val = str(row.iloc[0]).strip()
                 
-        else:
-            print("No valid results obtained from model comparison.")
+                # Skip rows with 'model' in first column
+                if first_col_val.lower() == 'model':
+                    continue
+                
+                # Check if this is a statistical header row (second column is 'std')
+                second_col_val = str(row.iloc[1]).strip() if len(row) > 1 else ""
+                
+                if second_col_val == 'std' and first_col_val == 'mean':
+                    # This is a statistical header row
+                    if not header_row_added:
+                        # Add the header row only once
+                        combined_df = pd.concat([combined_df, pd.DataFrame([row])], ignore_index=True)
+                        header_row_added = True
+                    # Skip all other statistical header rows
+                    continue
+                
+                # This is a data row - add it
+                combined_df = pd.concat([combined_df, pd.DataFrame([row])], ignore_index=True)
             
-    except Exception as e:
-        print(f"Model comparison failed: {str(e)}")
-
+        except Exception as e:
+            print(f"Error reading {file}: {str(e)}")
+            continue
+    
+    if combined_df.empty:
+        print("No valid data found in any model_summary.csv files")
+        return pd.DataFrame()
+    
+    # Clean up column names - remove .1, .2, .3 suffixes
+    cleaned_columns = []
+    for col in combined_df.columns:
+        if col == 'source_directory':
+            cleaned_columns.append(col)
+        else:
+            base_name = col.split('.')[0]
+            cleaned_columns.append(base_name)
+    
+    combined_df.columns = cleaned_columns
+    
+    # Rename first column to 'model_name' for clarity
+    if len(combined_df.columns) > 0:
+        first_col_name = combined_df.columns[0]
+        if first_col_name.startswith('Unnamed'):
+            combined_df.rename(columns={first_col_name: 'model_name'}, inplace=True)
+    
+    # Save the cleaned combined results
+    output_path = os.path.join(base_dir, output_filename)
+    combined_df.to_csv(output_path, index=False)
+    print(f"Cleaned combined results saved to {output_path}")
+    
+    return combined_df
 def main():
     print_welcome()
     gan_choice = get_gan_choice()
     
     if gan_choice == 0:
         # Handle evaluation
-        handle_evaluation()
+        # handle_evaluation()
+
+        # Combine Evaluations
+        csv_path = os.path.join(base, "batch_evaluation")
+        combined_data = combine_model_summaries(csv_path)
+        print(combined_data)
     else:
         # Handle SR model selection
         mode = get_mode(gan_choice.value)

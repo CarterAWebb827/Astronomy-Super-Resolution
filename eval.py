@@ -11,7 +11,6 @@ from scipy.stats import pearsonr, kendalltau
 import torch
 from torch import device
 from lpips import LPIPS
-import sewar
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
