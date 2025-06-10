@@ -163,13 +163,15 @@ After evaluation, you'll find these files in your output or batch_evaluation dir
 |single-step         |9.7289        |8.042         |1.8706        |23.2107       |304.4038     |129.0354     |158.6052     |494.2762     |0.1248|0.0611|0.0441|0.2286|51.3118        |29.3716        |13.7414        |93.568         |56.7515       |18.6035       |33.113        |76.9046       |55.8716 |19.1877 |33.0088 |76.7382 |653.1445           |642.1976           |135.2595           |1854.1793          |86.4631           |12.8222           |62.9734           |98.8165           |30.4095          |13.1351          |17.3289          |51.8098          |
 |non-single-step     |9.947         |8.4955        |1.839         |24.5516       |305.4771     |131.1986     |160.9348     |502.7327     |0.1248|0.0616|0.046 |0.2332|51.3347        |29.3363        |13.8092        |93.5531        |56.7424       |18.6155       |33.1411       |76.8955       |55.869  |19.1993 |33.0351 |76.7322 |658.9804           |686.4103           |145.6755           |1968.55            |86.5076           |12.5518           |63.7628           |99.4722           |30.5018          |13.5006          |17.9024          |53.1133          |
 
-
-
+- **Edge Intensity**: For edge intensity, the Real-ESRGAN and SinSR approaches seem to have the best values, while not being excesively high. This indicates sharper, more defined edges.
+- **Texture Score**: For texture score, the SRGAN and Real-ESRGAN models have the best values, with the SRGAN model performing the best overall. This measures richness of texture details, where higher values indicate better preservation of natural textures.
+- **LPIPS**: For LPIPS, it seems the SwinIR small model of DFO with PSNR and DFO with MFC and PSNR perform quite well. LPIPS helps to measures perceptual similarity to a reference. Lower values display more natural results.
+- **Mean Brightness**: For mean brightness, it seems no models deviate excessively, meaning they are all similar to the original image. 
+- **Std Brightness**: Similarly for standard deviation of the brightness, it seems no models deviate excessively, meaning they are all similar to the original image.
+- **Contrast**: Again, with contrast, each image preserves the contrast, which helps to reserves an images "pop".
+- **Sharpness (Laplacian)**: Laplacian sharpness shows how sharp the image is that a given model produces. Values that are too high can show over-sharpening. This can be seen with the SinSR models. A more appropriate value seems to be with the Real-ESRGAN model or the SwinSR model that utilizes DFO and GAN.
+- **Blocking Artifacts**: Block artifacts are grid-like compression artifacts. We prefer a lower value in this category. Some of the lowest values come from DFO with PSNR and DFO with MFC and PSNR from the SwinIR approach.
+- **Ringing Artifacts**: Ringing artifacts are halos and/or oscillations near the edges of an image. We also prefer a lower value, which we get from the DFO with MFC and PSNR, SRGAN, and DFO with PSNR approaches.
 
 ### Check consistency - good models should perform well across all metrics
-
-
-### Examine tradeoffs - some models may excel in PSNR but have higher artifacts
-
-
-### Review visual comparisons - metrics don't always capture perceptual quality
+Looking through the models, it seems the SRGAN is the most average model. It doesn't perform incredibly well, but it doesn't perform poorly either. Similarly, the Real-ESRGAN approach is just an overall well-performing model. It has good performance in most of the categories and even performs the best in a handful of them. In my opinion, the best overall approach comes from the SwinIR transformer, specifically the DFO with MFC and PSNR. It performs exceedingly well in many categories and when it isnt performing the best, it usually performs well. Also, the SinSR diffusion approach seemed to do well, but it hallucinates too many objects and doesn't do well when considering the halos generated from it.
